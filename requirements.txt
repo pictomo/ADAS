@@ -1,6 +1,9 @@
 # debug
 icecream
 
+# main
+python-dotenv
+
 # project default
 numpy
 tqdm
