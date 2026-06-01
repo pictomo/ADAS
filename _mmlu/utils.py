@@ -4,7 +4,9 @@ from collections import namedtuple
 
 import numpy as np
 
-Example = namedtuple('Example', ['question', 'choice1', 'choice2', 'choice3', 'choice4', 'correct_index'])
+Example = namedtuple(
+    "Example", ["question", "choice1", "choice2", "choice3", "choice4", "correct_index"]
+)
 
 QUERY_TEMPLATE_MULTICHOICE = """
 Answer the following multiple choice question.
@@ -23,21 +25,25 @@ def format_multichoice_question(row):
 
 
 def random_id(length=4):
-    characters = string.ascii_letters + string.digits  # includes both upper/lower case letters and numbers
-    random_id = ''.join(random.choices(characters, k=length))
+    characters = (
+        string.ascii_letters + string.digits
+    )  # includes both upper/lower case letters and numbers
+    random_id = "".join(random.choices(characters, k=length))
     return random_id
 
 
-def bootstrap_confidence_interval(data, num_bootstrap_samples=100000, confidence_level=0.95):
+def bootstrap_confidence_interval(
+    data, num_bootstrap_samples=100000, confidence_level=0.95
+):
     """
     Calculate the bootstrap confidence interval for the mean of 1D accuracy data.
     Also returns the median of the bootstrap means.
-    
+
     Args:
     - data (list or array of float): 1D list or array of data points.
     - num_bootstrap_samples (int): Number of bootstrap samples.
     - confidence_level (float): The desired confidence level (e.g., 0.95 for 95%).
-    
+
     Returns:
     - str: Formatted string with 95% confidence interval and median as percentages with one decimal place.
     """

@@ -1,14 +1,25 @@
+# ARC (Abstraction and Reasoning Corpus) タスク用のプロンプト定義モジュール
+# エージェント探索に使用するプロンプトテンプレート、初期アーカイブ、リフレクション用プロンプトを定義する
+
 import json
 
+# エージェント出力のフォーマット例（メタプロンプト内でLLMに提示するテンプレート）
+# thought: エージェント設計の着想・全体構想・実装手順
+# name: エージェントの名称
+# code: forward()メソッドの実装コード
 EXAMPLE = {
     "thought": "**Insights:**\nYour insights on what should be the next interesting agent.\n**Overall Idea:**\nyour reasoning and the overall concept behind the agent design.\n**Implementation:**\ndescribe the implementation step by step.",
     "name": "Name of your proposed agent",
     "code": """def forward(self, taskInfo):
     # Your code here
     return answer
-"""
+""",
 }
 
+# ===== 初期アーカイブ: 探索の出発点となるベースラインエージェント群 =====
+
+# Chain-of-Thought (CoT) エージェント
+# LLMにステップバイステップで考えさせた後、変換コードを生成・実行して回答を得る基本的な手法
 COT_code = {
     "thought": "Directly formatting the output can be challenging. A good practice is to allow the LLM to write the transformation code and then evaluate it to generate the output. This ensures that the output is derived from executable code, improving reliability.",
     "name": "Chain-of-Thought",
@@ -28,9 +39,11 @@ COT_code = {
     
     # Return the final output derived from the code execution
     return answer
-    """
+    """,
 }
 
+# Self-Consistency with CoT エージェント
+# 高温度設定で複数のCoTエージェントを実行し、多様な推論パスから最終回答をアンサンブルする手法
 COT_SC = {
     "thought": "While an LLM can arrive at the correct answer, its reasoning may vary. By repeatedly asking the same question with high temperature settings, we can generate different reasoning paths. We then combine multiple answers from these Chain-of-Thought (CoT) agents to produce a more accurate final answer through ensembling. Note that we need to collect only the ones that pass the examples, preventing the context length from becoming too long.",
     "name": "Self-Consistency with Chain-of-Thought",
@@ -58,9 +71,12 @@ COT_SC = {
     answer = self.get_test_output_from_code(code)
     
     return answer
-    """
+    """,
 }
 
+# Self-Refine (Reflexion) エージェント
+# 例題でのフィードバックを基に、LLMが反復的に回答を改善していく手法
+# run_examples_and_get_feedback を利用してコードの正誤を検証し、次のイテレーションに反映する
 Reflexion = {
     "thought": "To enhance its performance, an LLM can iteratively improve its answer based on feedback. After each answer, testing on the examples to provide feedback, and the LLM uses insights from previous attempts and feedback to refine its answer. It is very good practice to use `self.run_examples_and_get_feedback` to get feedback. One should consider trying to use this feedback in future agent design.",
     "name": "Self-Refine (Reflexion)",
@@ -95,9 +111,12 @@ Reflexion = {
     # Get the final answer after refinement
     answer = self.get_test_output_from_code(code)
     return answer
-    """
+    """,
 }
 
+# LLM Debate エージェント
+# 異なる役割（パズルデザイナー、論理学者など）を持つ複数エージェントが議論し、
+# 多角的な視点から最良の解法を導き出す手法
 LLM_debate = {
     "thought": "By letting different LLMs debate with each other, we can leverage their diverse perspectives to find better solutions for tasks.",
     "name": "LLM Debate",
@@ -134,9 +153,12 @@ LLM_debate = {
     thinking, code = final_decision_agent([taskInfo] + all_results[max_round-1], final_decision_instruction)
     answer = self.get_test_output_from_code(code)
     return answer
-    """
+    """,
 }
 
+# Quality-Diversity (QD) エージェント
+# 品質多様性手法に着想を得て、過去の試行を踏まえつつ多様で興味深い解法を複数生成し、
+# 上位の解法を選別して最終判断を行う手法
 QD = {
     "thought": "Similar to Quality-Diversity methods, allowing the LLM to generate multiple diverse and interesting solutions could be beneficial.",
     "name": "Quality-Diversity",
@@ -190,11 +212,23 @@ QD = {
     thinking, code = final_decision_agent(final_inputs, final_decision_instruction)
     answer = self.get_test_output_from_code(code)
     return answer
-    """
+    """,
 }
 
-system_prompt = """You are a helpful assistant. Make sure to return in a WELL-FORMED JSON object."""
+# LLMへのシステムプロンプト（JSON形式での応答を強制する）
+system_prompt = (
+    """You are a helpful assistant. Make sure to return in a WELL-FORMED JSON object."""
+)
 
+# メタプロンプト本体: エージェント探索のためのメインプロンプトテンプレート
+# [ARCHIVE] にはこれまでに発見されたエージェントアーキテクチャのアーカイブが挿入される
+# [EXAMPLE] には出力フォーマットの例が挿入される
+# 構成:
+#   1. 概要説明（ARCタスクの説明、ユーティリティコードの参照情報）
+#   2. 発見済みアーキテクチャのアーカイブ
+#   3. 出力フォーマットの指示と例
+#   4. よくある実装ミスの例（注意喚起）
+#   5. 新しいエージェント設計のタスク指示
 base = """# Overview
 You are an expert machine learning researcher testing various agentic systems. Your objective is to design building blocks such as prompts and control flows within these systems to solve complex tasks. Your aim is to design an optimal agent performing well on the ARC (Abstraction and Reasoning Corpus) challenge.
 In this challenge, each task consists of three demonstration examples, and one test example. Each Example consists of an “input grid” and an “output grid”. Test-takers need to use the transformation rule learned from the examples to predict the output grid for the test example.
@@ -617,6 +651,8 @@ Use the knowledge from the archive and inspiration from academic literature to p
 THINK OUTSIDE THE BOX.
 """
 
+# リフレクションプロンプト1: 生成されたエージェント設計を批判的に振り返るためのプロンプト
+# 1. 革新性の評価 2. 実装ミスの特定 3. 改善提案 を行わせる
 Reflexion_prompt_1 = f""""[EXAMPLE]Carefully review the proposed new architecture and reflect on the following points:"
 
 1. **Interestingness**: Assess whether your proposed architecture is interesting or innovative compared to existing methods in the archive. If you determine that the proposed architecture is not interesting, suggest a new architecture that addresses these shortcomings. 
@@ -645,6 +681,7 @@ Your response should be organized as follows:
 "code": Provide the corrected code or an improved implementation. Make sure you actually implement your fix and improvement in this code.
 """
 
+# リフレクションプロンプト2: 「よくある実装ミス」を参照して更にコードを修正させるプロンプト
 Reflexion_prompt_2 = """Using the tips in "## WRONG Implementation examples" section, revise the code further.
 Your response should be organized as follows:
 Put your new reflection thinking in "reflection". Repeat the previous "thought" and "name", and update the corrected version of the code in "code".
@@ -652,6 +689,19 @@ Put your new reflection thinking in "reflection". Repeat the previous "thought" 
 
 
 def get_prompt(current_archive, adaptive=False):
+    """探索用のメタプロンプトを生成する。
+
+    メタプロンプトテンプレート(base)にアーカイブと出力例を埋め込み、
+    LLMに新しいエージェントアーキテクチャを提案させるためのプロンプトを構築する。
+
+    Args:
+        current_archive (list[dict]): これまでに発見されたエージェントのリスト。
+        adaptive (bool): 適応モードフラグ（現在未使用）。
+
+    Returns:
+        tuple: (システムプロンプト, ユーザープロンプト)
+    """
+    # アーカイブをJSON文字列に変換してテンプレートに埋め込む
     archive_str = ",\n".join([json.dumps(sol) for sol in current_archive])
     archive_str = f"[{archive_str}]"
     prompt = base.replace("[ARCHIVE]", archive_str)
@@ -661,10 +711,36 @@ def get_prompt(current_archive, adaptive=False):
 
 
 def get_init_archive():
+    """探索の初期アーカイブを返す。
+
+    5つのベースラインエージェント（CoT, Reflexion, LLM Debate, CoT-SC, QD）を
+    初期集団として返す。これらを出発点として新しいエージェントが進化的に探索される。
+
+    Returns:
+        list[dict]: 初期エージェントアーキテクチャのリスト。
+    """
     return [COT_code, Reflexion, LLM_debate, COT_SC, QD]
 
 
 def get_reflexion_prompt(prev_example):
-    prev_example_str = "Here is the previous agent you tried:\n" + json.dumps(prev_example) + "\n\n"
-    r1 = Reflexion_prompt_1.replace("[EXAMPLE]", prev_example_str) if prev_example else Reflexion_prompt_1.replace("[EXAMPLE]", "")
+    """リフレクション用のプロンプトペアを生成する。
+
+    前回試行したエージェントの情報をリフレクションプロンプトに埋め込み、
+    LLMに設計の振り返りと改善を促すプロンプトを構築する。
+
+    Args:
+        prev_example (dict | None): 前回試行したエージェントの情報。
+            Noneの場合は前回例なしでプロンプトを生成する。
+
+    Returns:
+        tuple: (リフレクションプロンプト1, リフレクションプロンプト2)
+    """
+    prev_example_str = (
+        "Here is the previous agent you tried:\n" + json.dumps(prev_example) + "\n\n"
+    )
+    r1 = (
+        Reflexion_prompt_1.replace("[EXAMPLE]", prev_example_str)
+        if prev_example
+        else Reflexion_prompt_1.replace("[EXAMPLE]", "")
+    )
     return r1, Reflexion_prompt_2

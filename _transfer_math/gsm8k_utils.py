@@ -18,7 +18,7 @@ def score_gsm8k(target: str, prediction: str) -> bool:
 
 def extract_answer_str(answer_str):
     # Define the regular expression pattern
-    pattern = r'#### (-?\d+)'
+    pattern = r"#### (-?\d+)"
 
     # Use re.search to find the match
     match = re.search(pattern, answer_str)
@@ -35,27 +35,31 @@ def get_all_examples(filepath):
     with open(filepath, mode="r", encoding="utf-8") as f:
         examples = [json.loads(line) for line in f]
     for example in examples:
-        example['inputs'] = "Solve this math problem:\n" + example['question']
-        example['targets'] = extract_answer_str(example['answer'])
+        example["inputs"] = "Solve this math problem:\n" + example["question"]
+        example["targets"] = extract_answer_str(example["answer"])
     return examples
 
 
 def random_id(length=4):
-    characters = string.ascii_letters + string.digits  # includes both upper/lower case letters and numbers
-    random_id = ''.join(random.choices(characters, k=length))
+    characters = (
+        string.ascii_letters + string.digits
+    )  # includes both upper/lower case letters and numbers
+    random_id = "".join(random.choices(characters, k=length))
     return random_id
 
 
-def bootstrap_confidence_interval(data, num_bootstrap_samples=100000, confidence_level=0.95):
+def bootstrap_confidence_interval(
+    data, num_bootstrap_samples=100000, confidence_level=0.95
+):
     """
     Calculate the bootstrap confidence interval for the mean of 1D accuracy data.
     Also returns the median of the bootstrap means.
-    
+
     Args:
     - data (list or array of float): 1D list or array of data points.
     - num_bootstrap_samples (int): Number of bootstrap samples.
     - confidence_level (float): The desired confidence level (e.g., 0.95 for 95%).
-    
+
     Returns:
     - str: Formatted string with 95% confidence interval and median as percentages with one decimal place.
     """

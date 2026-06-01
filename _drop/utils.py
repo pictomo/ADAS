@@ -47,7 +47,9 @@ def _normalize_answer(text: str) -> str:
     """Lower text and remove punctuation, articles and extra whitespace."""
 
     parts = [
-        _white_space_fix(_remove_articles(_normalize_number(_remove_punc(_lower(token)))))
+        _white_space_fix(
+            _remove_articles(_normalize_number(_remove_punc(_lower(token))))
+        )
         for token in _tokenize(text)
     ]
     parts = [part for part in parts if part.strip()]
@@ -71,7 +73,7 @@ def _normalize_number(text: str) -> str:
 
 
 def _answer_to_bags(
-        answer: Union[str, List[str], Tuple[str, ...]]
+    answer: Union[str, List[str], Tuple[str, ...]],
 ) -> Tuple[List[str], List[Set[str]]]:
     if isinstance(answer, (list, tuple)):
         raw_spans = answer
@@ -115,10 +117,10 @@ def _compute_f1(predicted_bag: Set[str], gold_bag: Set[str]) -> float:
     else:
         recall = intersection / float(len(gold_bag))
     f1 = (
-             (2 * precision * recall) / (precision + recall)
-             if not (precision == 0.0 and recall == 0.0)
-             else 0.0
-         ) * 100
+        (2 * precision * recall) / (precision + recall)
+        if not (precision == 0.0 and recall == 0.0)
+        else 0.0
+    ) * 100
     return f1
 
 
@@ -137,7 +139,8 @@ def _match_numbers_if_present(gold_bag: Set[str], predicted_bag: Set[str]) -> bo
 
 
 def get_drop_metrics(
-        predicted: Union[str, List[str], Tuple[str, ...]], gold: Union[str, List[str], Tuple[str, ...]]
+    predicted: Union[str, List[str], Tuple[str, ...]],
+    gold: Union[str, List[str], Tuple[str, ...]],
 ) -> Tuple[float, float]:
     """
     Takes a predicted answer and a gold answer (that are both either a string or a list of
@@ -149,7 +152,9 @@ def get_drop_metrics(
     predicted_bags = _answer_to_bags(predicted)
     gold_bags = _answer_to_bags(gold)
 
-    if set(predicted_bags[0]) == set(gold_bags[0]) and len(predicted_bags[0]) == len(gold_bags[0]):
+    if set(predicted_bags[0]) == set(gold_bags[0]) and len(predicted_bags[0]) == len(
+        gold_bags[0]
+    ):
         exact_match = 1.0
     else:
         exact_match = 0.0
@@ -174,7 +179,9 @@ def answer_json_to_strings(answer: Dict[str, Any]) -> Tuple[Tuple[str, ...], str
             tuple(
                 [
                     "{0} {1} {2}".format(
-                        answer["date"]["day"], answer["date"]["month"], answer["date"]["year"]
+                        answer["date"]["day"],
+                        answer["date"]["month"],
+                        answer["date"]["year"],
                     ).strip()
                 ]
             ),
@@ -236,28 +243,32 @@ Passage: As of the census of 2000, there were 952 people, 392 households, and 24
 """
     examples = []
     for sample in test_samples:
-        sample['inputs'] = few_shot_prompt + sample['context']
-        sample['targets'] = sample["ref_text"].split("|")
+        sample["inputs"] = few_shot_prompt + sample["context"]
+        sample["targets"] = sample["ref_text"].split("|")
         examples.append(sample)
     return examples
 
 
 def random_id(length=4):
-    characters = string.ascii_letters + string.digits  # includes both upper/lower case letters and numbers
-    random_id = ''.join(random.choices(characters, k=length))
+    characters = (
+        string.ascii_letters + string.digits
+    )  # includes both upper/lower case letters and numbers
+    random_id = "".join(random.choices(characters, k=length))
     return random_id
 
 
-def bootstrap_confidence_interval(data, num_bootstrap_samples=100000, confidence_level=0.95):
+def bootstrap_confidence_interval(
+    data, num_bootstrap_samples=100000, confidence_level=0.95
+):
     """
     Calculate the bootstrap confidence interval for the mean of 1D accuracy data.
     Also returns the median of the bootstrap means.
-    
+
     Args:
     - data (list or array of float): 1D list or array of data points.
     - num_bootstrap_samples (int): Number of bootstrap samples.
     - confidence_level (float): The desired confidence level (e.g., 0.95 for 95%).
-    
+
     Returns:
     - str: Formatted string with 95% confidence interval and median as percentages with one decimal place.
     """
