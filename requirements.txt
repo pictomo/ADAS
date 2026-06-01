@@ -1,3 +1,7 @@
+# debug
+icecream
+
+# project default
 numpy
 tqdm
 pandas
