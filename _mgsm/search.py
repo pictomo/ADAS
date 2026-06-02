@@ -1,3 +1,6 @@
+# MGSMタスクにおけるエージェントアーキテクチャの自動探索・評価を行うメインモジュール
+# LLMを用いて新しいエージェント設計を提案・評価し、進化的に最適なエージェントを探索する
+
 import argparse
 import copy
 import json
@@ -13,24 +16,45 @@ from tqdm import tqdm
 
 from mgsm_prompt import get_init_archive, get_prompt, get_reflexion_prompt
 
+# OpenAI APIクライアントの初期化
 client = openai.OpenAI()
 
 from utils import get_all_examples, random_id, bootstrap_confidence_interval, score_mgsm
 
+# エージェント間でやり取りされる情報を保持する名前付きタプル
+# name: フィールド名, author: 生成者, content: 内容, iteration_idx: イテレーション番号
 Info = namedtuple("Info", ["name", "author", "content", "iteration_idx"])
 
+# LLMの出力フォーマットを指定するテンプレート（JSON形式での応答を強制）
 FORMAT_INST = (
     lambda request_keys: f"""Reply EXACTLY with the following JSON format.\n{str(request_keys)}\nDO NOT MISS ANY REQUEST FIELDS and ensure that your response is a well-formed JSON object!\n"""
 )
+# LLMの役割記述テンプレート
 ROLE_DESC = lambda role: f"You are a {role}."
 SYSTEM_MSG = ""
 
+# デバッグ出力フラグ
 PRINT_LLM_DEBUG = False
+# 探索モードフラグ（True=検証データで探索、False=テストデータで評価）
 SEARCHING_MODE = True
 
 
 @backoff.on_exception(backoff.expo, openai.RateLimitError)
 def get_json_response_from_gpt(msg, model, system_message, temperature=0.5):
+    """GPTモデルからJSON形式のレスポンスを取得する。
+
+    レートリミット時には指数バックオフで自動リトライする。
+    単一メッセージの問い合わせに使用する。
+
+    Args:
+        msg (str): ユーザーメッセージ。
+        model (str): 使用するGPTモデル名。
+        system_message (str): システムメッセージ。
+        temperature (float): サンプリング温度。
+
+    Returns:
+        dict: パース済みのJSONディクショナリ。
+    """
     response = client.chat.completions.create(
         model=model,
         messages=[
@@ -51,6 +75,20 @@ def get_json_response_from_gpt(msg, model, system_message, temperature=0.5):
 
 @backoff.on_exception(backoff.expo, openai.RateLimitError)
 def get_json_response_from_gpt_reflect(msg_list, model, temperature=0.8):
+    """GPTモデルからリフレクション用のJSONレスポンスを取得する。
+
+    複数メッセージの会話履歴（msg_list）を渡して、リフレクションや
+    デバッグのための多ターン対話に使用する。
+    レートリミット時には指数バックオフで自動リトライする。
+
+    Args:
+        msg_list (list[dict]): メッセージ履歴のリスト（role/contentの辞書）。
+        model (str): 使用するGPTモデル名。
+        temperature (float): サンプリング温度。
+
+    Returns:
+        dict: パース済みのJSONディクショナリ。
+    """
     response = client.chat.completions.create(
         model=model,
         messages=msg_list,
@@ -66,7 +104,11 @@ def get_json_response_from_gpt_reflect(msg_list, model, temperature=0.8):
 
 
 class LLMAgentBase:
-    """
+    """LLMエージェントの基底クラス。
+
+    プロンプトの構築、GPTへの問い合わせ、応答のパースを担当する。
+    各エージェントは役割・温度・出力フィールドをカスタマイズできる。
+
     Attributes:
     """
 
@@ -78,6 +120,15 @@ class LLMAgentBase:
         model="gpt-3.5-turbo-0125",
         temperature=0.5,
     ) -> None:
+        """LLMエージェントを初期化する。
+
+        Args:
+            output_fields (list): LLMに出力させるフィールド名のリスト（例: ['thinking', 'answer']）。
+            agent_name (str): エージェントの名前。
+            role (str): LLMに与える役割の説明。
+            model (str): 使用するGPTモデル名。
+            temperature (float): サンプリング温度。
+        """
         self.output_fields = output_fields
         self.agent_name = agent_name
 
@@ -89,6 +140,20 @@ class LLMAgentBase:
         self.id = random_id()
 
     def generate_prompt(self, input_infos, instruction) -> str:
+        """LLMに送るプロンプトを構築する。
+
+        入力情報（Infoオブジェクトのリスト）と指示文から、
+        システムプロンプトとユーザープロンプトを生成する。
+        answerフィールドには整数のみを返す旨の指示が付加される。
+
+        Args:
+            input_infos (list): 入力情報のInfoオブジェクトのリスト。
+            instruction (str): タスクの指示文。
+
+        Returns:
+            tuple: (システムプロンプト, ユーザープロンプト)
+        """
+        # システムプロンプトの構築（役割 + 出力フォーマット指定）
         # construct system prompt
         output_fields_and_description = {
             key: (
@@ -102,11 +167,12 @@ class LLMAgentBase:
             ROLE_DESC(self.role) + "\n\n" + FORMAT_INST(output_fields_and_description)
         )
 
+        # 入力情報をMarkdown形式のテキストに変換
         # construct input infos text
         input_infos_text = ""
         for input_info in input_infos:
             if isinstance(input_info, Info):
-                (field_name, author, content, iteration_idx) = input_info
+                field_name, author, content, iteration_idx = input_info
             else:
                 continue
             if author == self.__repr__():
@@ -120,10 +186,24 @@ class LLMAgentBase:
             else:
                 input_infos_text += f"### {field_name} by {author}:\n{content}\n\n"
 
+        # 入力情報テキストと指示文を結合して最終プロンプトを生成
         prompt = input_infos_text + instruction
         return system_prompt, prompt
 
     def query(self, input_infos: list, instruction, iteration_idx=-1) -> dict:
+        """入力情報と指示文を基にLLMに問い合わせ、結果をInfoリストとして返す。
+
+        プロンプトを構築してGPTに問い合わせ、JSONレスポンスをパースして
+        Infoオブジェクトのリストに変換する。エラー時は不足フィールドの補完を試みる。
+
+        Args:
+            input_infos (list): 入力情報のInfoオブジェクトのリスト。
+            instruction (str): タスクの指示文。
+            iteration_idx (int): イテレーション番号（-1は番号なし）。
+
+        Returns:
+            list[Info]: 出力情報のInfoオブジェクトのリスト。
+        """
         system_prompt, prompt = self.generate_prompt(input_infos, instruction)
         try:
             response_json = {}
@@ -139,6 +219,7 @@ class LLMAgentBase:
                 raise AssertionError(
                     "The context is too long. Please try to design the agent to have shorter context."
                 )
+            # 不足フィールドを空文字で補完し、余分なフィールドを削除する
             # try to fill in the missing field
             for key in self.output_fields:
                 if not key in response_json and len(response_json) < len(
@@ -165,11 +246,26 @@ class LLMAgentBase:
 
 
 class AgentSystem:
+    """MGSMタスクを解くエージェントシステム。
+
+    forward()メソッドは探索中に動的に差し替えられる。
+    """
+
     def __init__(self) -> None:
         pass
 
 
 def search(args):
+    """エージェントアーキテクチャの探索を実行する。
+
+    初期アーカイブの評価後、LLMを使って新しいエージェントの提案・リフレクション・
+    評価を繰り返し、進化的にアーカイブを拡張していく。
+    結果は各世代ごとにJSONファイルに保存される。
+
+    Args:
+        args: コマンドライン引数（モデル名、世代数、保存先など）。
+    """
+    # 既存のアーカイブがあれば読み込み、なければ初期アーカイブで開始
     file_path = os.path.join(args.save_dir, f"{args.expr_name}_run_archive.json")
     if os.path.exists(file_path):
         with open(file_path, "r") as json_file:
@@ -195,6 +291,7 @@ def search(args):
             print(e)
             continue
 
+        # ブートストラップ信頼区間を算出して適応度として保存
         fitness_str = bootstrap_confidence_interval(acc_list)
         solution["fitness"] = fitness_str
 
@@ -203,8 +300,10 @@ def search(args):
         with open(file_path, "w") as json_file:
             json.dump(archive, json_file, indent=4)
 
+    # 各世代で新しいエージェントを提案・リフレクション・評価するループ
     for n in range(start, args.n_generation):
         print(f"============Generation {n + 1}=================")
+        # メタプロンプトを構築して新しいエージェントを提案させる
         system_prompt, prompt = get_prompt(archive)
         msg_list = [
             {"role": "system", "content": system_prompt},
@@ -213,6 +312,7 @@ def search(args):
         try:
             next_solution = get_json_response_from_gpt_reflect(msg_list, args.model)
 
+            # 2回のリフレクションで設計を洗練させる
             Reflexion_prompt_1, Reflexion_prompt_2 = get_reflexion_prompt(
                 archive[-1] if n > 0 else None
             )
@@ -230,6 +330,7 @@ def search(args):
             n -= 1
             continue
 
+        # 提案されたエージェントの評価（失敗時はデバッグを試みる）
         acc_list = []
         for _ in range(args.debug_max):
             try:
@@ -260,6 +361,7 @@ def search(args):
             n -= 1
             continue
 
+        # 適応度を算出し、不要なフィールドを除去してアーカイブに追加
         fitness_str = bootstrap_confidence_interval(acc_list)
         next_solution["fitness"] = fitness_str
         next_solution["generation"] = n + 1
@@ -277,6 +379,15 @@ def search(args):
 
 
 def evaluate(args):
+    """探索済みアーカイブの全エージェントをテストデータで評価する。
+
+    探索フェーズで見つけた各エージェントをテストデータに対して評価し、
+    結果を別のJSONファイルに保存する。
+
+    Args:
+        args: コマンドライン引数。
+    """
+    # 探索アーカイブと評価アーカイブのファイルパスを設定
     file_path = os.path.join(args.save_dir, f"{args.expr_name}_run_archive.json")
     eval_file_path = (
         str(os.path.join(args.save_dir, f"{args.expr_name}_run_archive.json")).strip(
@@ -291,6 +402,7 @@ def evaluate(args):
         with open(eval_file_path, "r") as json_file:
             eval_archive = json.load(json_file)
 
+    # アーカイブ内の各エージェントを順番にテスト評価
     current_idx = 0
     while current_idx < len(archive):
         with open(file_path, "r") as json_file:
@@ -317,6 +429,20 @@ def evaluate(args):
 
 
 def evaluate_forward_fn(args, forward_str):
+    """エージェントのforward関数を動的に定義し、MGSMデータセットで評価する。
+
+    文字列として渡されたforward関数をexecで動的に定義し、
+    AgentSystemにセットして、マルチスレッドでMGSMタスク群を評価する。
+    探索モードでは検証データ、評価モードではテストデータを使用する。
+
+    Args:
+        args: コマンドライン引数（データサイズ、シャッフルシード、ワーカー数など）。
+        forward_str (str): forward()関数のソースコード文字列。
+
+    Returns:
+        list[float]: 各問題の正誤スコア（正解=1, 不正解=0）のリスト。
+    """
+    # forward関数を動的に定義してAgentSystemにセット
     # dynamically define forward()
     # modified from https://github.com/luchris429/DiscoPOP/blob/main/scripts/launch_evo.py
     namespace = {}
@@ -329,6 +455,7 @@ def evaluate_forward_fn(args, forward_str):
         raise AssertionError(f"{func} is not callable")
     setattr(AgentSystem, "forward", func)
 
+    # 全例題を取得してシード固定でシャッフルし、探索/テストモードに応じてスライス
     # set seed 0 for valid set
     examples = get_all_examples()
     random.seed(args.shuffle_seed)
@@ -348,6 +475,7 @@ def evaluate_forward_fn(args, forward_str):
     print(f"problem length: {len(examples)}")
     max_workers = min(len(examples), args.max_workers) if args.multiprocessing else 1
 
+    # 各問題をInfoオブジェクトに変換してタスクキューを作成
     task_queue = []
     for q in questions:
         taskInfo = Info("task", "User", q, -1)
@@ -355,12 +483,14 @@ def evaluate_forward_fn(args, forward_str):
 
     agentSystem = AgentSystem()
 
+    # マルチスレッドで全タスクを並列評価
     acc_list = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         results = list(
             tqdm(executor.map(agentSystem.forward, task_queue), total=len(task_queue))
         )
 
+    # 各結果を正解と比較してスコアを算出
     for q_idx, res in enumerate(results):
         try:
             if isinstance(res, Info):
@@ -379,6 +509,7 @@ def evaluate_forward_fn(args, forward_str):
 
 
 if __name__ == "__main__":
+    # コマンドライン引数のパース
     parser = argparse.ArgumentParser()
     parser.add_argument("--valid_size", type=int, default=128)
     parser.add_argument("--test_size", type=int, default=800)

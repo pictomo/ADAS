@@ -1,5 +1,12 @@
+# MGSM (Multilingual Grade School Math) タスク用のプロンプト定義モジュール
+# エージェント探索に使用するプロンプトテンプレート、初期アーカイブ、リフレクション用プロンプトを定義する
+
 import json
 
+# エージェント出力のフォーマット例（メタプロンプト内でLLMに提示するテンプレート）
+# thought: エージェント設計の着想・全体構想・実装手順
+# name: エージェントの名称
+# code: forward()メソッドの実装コード
 EXAMPLE = {
     "thought": "**Insights:**\nYour insights on what should be the next interesting agent.\n**Overall Idea:**\nyour reasoning and the overall concept behind the agent design.\n**Implementation:**\ndescribe the implementation step by step.",
     "name": "Name of your proposed agent",
@@ -9,6 +16,10 @@ EXAMPLE = {
 """,
 }
 
+# ===== 初期アーカイブ: 探索の出発点となるベースラインエージェント群 =====
+
+# Chain-of-Thought (CoT) エージェント
+# LLMにステップバイステップで考えさせた後、最終回答を得る基本的な手法
 COT = {
     "thought": "By encouraging the LLM to think step by step rather than directly outputting an answer, chain-of-thought reasoning enables complex problem-solving through intermediate steps. This practice improves the model's ability to handle tasks that require deeper reasoning and provides insight into its decision-making process.",
     "name": "Chain-of-Thought",
@@ -33,6 +44,8 @@ COT = {
 """,
 }
 
+# Self-Consistency with CoT エージェント
+# 高温度設定で複数のCoTエージェントを実行し、多数決で最終回答を決定する手法
 COT_SC = {
     "thought": "While an LLM can arrive at the correct answer, its reasoning may vary. By repeatedly asking the same question with high temperature settings, we can generate different reasoning paths. We then combine multiple answers from these Chain-of-Thought (CoT) agents to produce a more accurate final answer through ensembling.",
     "name": "Self-Consistency with Chain-of-Thought",
@@ -60,6 +73,9 @@ COT_SC = {
 """,
 }
 
+# Self-Refine (Reflexion) エージェント
+# 批評エージェントのフィードバックを基に、LLMが反復的に回答を改善していく手法
+# Critic Agentが正確と判断したら早期終了する
 Reflexion = {
     "thought": "To enhance its performance, an LLM can iteratively improve its answer based on feedback. By reflecting on its previous attempts and incorporating feedback, the model can refine its reasoning and provide a more accurate solution.",
     "name": "Self-Refine (Reflexion)",
@@ -96,6 +112,9 @@ Reflexion = {
 """,
 }
 
+# LLM Debate エージェント
+# 異なる役割（数学教授、小学校教師、数学愛好家）を持つ複数エージェントが議論し、
+# 多角的な視点から最良の解法を導き出す手法
 LLM_debate = {
     "thought": "By letting different LLMs debate with each other, we can leverage their diverse perspectives to find better solutions for tasks.",
     "name": "LLM Debate",
@@ -134,6 +153,9 @@ LLM_debate = {
 """,
 }
 
+# Step-back Abstraction エージェント
+# まず問題に関連する物理・化学・生物などの原理を抽象化して理解させてから、
+# その原理に基づいて問題を解かせる手法（Step-back Promptingに基づく）
 Take_a_step_back = {
     "thought": "Let LLM first think about the principles involved in solving this task which could be helpful. By understanding the underlying principles, the model can better reason through the problem and provide a more accurate solution.",
     "name": "Step-back Abstraction",
@@ -157,6 +179,9 @@ Take_a_step_back = {
 """,
 }
 
+# Quality-Diversity (QD) エージェント
+# 品質多様性手法に着想を得て、過去の試行を踏まえつつ多様で興味深い解法を複数生成し、
+# 最終的に集約して回答を導き出す手法
 QD = {
     "thought": "Similar to Quality-Diversity methods, let LLM generate multiple diverse interesting solutions could help. By encouraging the model to explore different reasoning paths, we can increase the chances of finding the best solution.",
     "name": "Quality-Diversity",
@@ -196,6 +221,9 @@ QD = {
 """,
 }
 
+# Dynamic Role Assignment エージェント
+# Auto-GPTやExpert Promptingに着想を得て、タスク内容をルーティングエージェントが判定し、
+# 最適な専門家エージェント（数学教授・教師・愛好家など）に動的に割り当てる手法
 Role_Assignment = {
     "thought": "Similar to Auto-GPT and expert prompting, we can use dynamic control flow in the design to let the agent decide what expert we should use.",
     "name": "Dynamic Assignment of Roles",
@@ -225,10 +253,20 @@ Role_Assignment = {
 """,
 }
 
+# LLMへのシステムプロンプト（JSON形式での応答を強制する）
 system_prompt = (
     """You are a helpful assistant. Make sure to return in a WELL-FORMED JSON object."""
 )
 
+# メタプロンプト本体: エージェント探索のためのメインプロンプトテンプレート
+# [ARCHIVE] にはこれまでに発見されたエージェントアーキテクチャのアーカイブが挿入される
+# [EXAMPLE] には出力フォーマットの例が挿入される
+# 構成:
+#   1. 概要説明（MGSMタスクの説明、ユーティリティコードの参照情報）
+#   2. 発見済みアーキテクチャのアーカイブ
+#   3. 出力フォーマットの指示と例
+#   4. よくある実装ミスの例（注意喚起）
+#   5. 新しいエージェント設計のタスク指示
 base = """# Overview
 You are an expert machine learning researcher testing various agentic systems. Your objective is to design building blocks such as prompts and control flows within these systems to solve complex tasks. Your aim is to design an optimal agent performing well on the Multilingual Grade School Math Benchmark (MGSM) which evaluates mathematical problem-solving abilities across various languages to ensure broad and effective multilingual performance.
 
@@ -495,6 +533,8 @@ Using the knowledge learned from the archive and the inspiration from academic l
 THINK OUTSIDE THE BOX.
 """
 
+# リフレクションプロンプト1: 生成されたエージェント設計を批判的に振り返るためのプロンプト
+# 1. 革新性の評価 2. 実装ミスの特定 3. 改善提案 を行わせる
 Reflexion_prompt_1 = f""""[EXAMPLE]Carefully review the proposed new architecture and reflect on the following points:"
 
 1. **Interestingness**: Assess whether your proposed architecture is interesting or innovative compared to existing methods in the archive. If you determine that the proposed architecture is not interesting, suggest a new architecture that addresses these shortcomings. 
@@ -523,6 +563,7 @@ Your response should be organized as follows:
 "code": Provide the corrected code or an improved implementation. Make sure you actually implement your fix and improvement in this code.
 """
 
+# リフレクションプロンプト2: 「よくある実装ミス」を参照して更にコードを修正させるプロンプト
 Reflexion_prompt_2 = """Using the tips in "## WRONG Implementation examples" section, revise the code further.
 Your response should be organized as follows:
 Put your new reflection thinking in "reflection". Repeat the previous "thought" and "name", and update the corrected version of the code in "code".
@@ -530,10 +571,31 @@ Put your new reflection thinking in "reflection". Repeat the previous "thought" 
 
 
 def get_init_archive():
+    """探索の初期アーカイブを返す。
+
+    7つのベースラインエージェント（CoT, CoT-SC, Reflexion, LLM Debate,
+    Step-back Abstraction, QD, Role Assignment）を初期集団として返す。
+    これらを出発点として新しいエージェントが進化的に探索される。
+
+    Returns:
+        list[dict]: 初期エージェントアーキテクチャのリスト。
+    """
     return [COT, COT_SC, Reflexion, LLM_debate, Take_a_step_back, QD, Role_Assignment]
 
 
 def get_prompt(current_archive, adaptive=False):
+    """探索用のメタプロンプトを生成する。
+
+    メタプロンプトテンプレート(base)にアーカイブと出力例を埋め込み、
+    LLMに新しいエージェントアーキテクチャを提案させるためのプロンプトを構築する。
+
+    Args:
+        current_archive (list[dict]): これまでに発見されたエージェントのリスト。
+        adaptive (bool): 適応モードフラグ（現在未使用）。
+
+    Returns:
+        tuple: (システムプロンプト, ユーザープロンプト)
+    """
     archive_str = ",\n".join([json.dumps(sol) for sol in current_archive])
     archive_str = f"[{archive_str}]"
     prompt = base.replace("[ARCHIVE]", archive_str)
@@ -543,6 +605,18 @@ def get_prompt(current_archive, adaptive=False):
 
 
 def get_reflexion_prompt(prev_example):
+    """リフレクション用のプロンプトペアを生成する。
+
+    前回試行したエージェントの情報をリフレクションプロンプトに埋め込み、
+    LLMに設計の振り返りと改善を促すプロンプトを構築する。
+
+    Args:
+        prev_example (dict | None): 前回試行したエージェントの情報。
+            Noneの場合は前回例なしでプロンプトを生成する。
+
+    Returns:
+        tuple: (リフレクションプロンプト1, リフレクションプロンプト2)
+    """
     prev_example_str = (
         "Here is the previous agent you tried:\n" + json.dumps(prev_example) + "\n\n"
     )
