@@ -1,4 +1,4 @@
-from util import str2vec, cos_sim, dist
+from util.vec import str2vec, cos_sim, dist
 from icecream import ic
 
 if __name__ == "__main__":
