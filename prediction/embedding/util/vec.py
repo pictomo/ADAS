@@ -1,5 +1,4 @@
 import atexit
-import json
 import pickle
 import sys
 from pathlib import Path
@@ -10,22 +9,17 @@ sys.path.append(str(Path(__file__).resolve().parents[3]))
 
 from llm_provider import client
 
-_CACHE_PATH = Path(__file__).resolve().parents[1] / "cache" / "embedding.json"
-_LEGACY_CACHE_PATH = _CACHE_PATH.with_suffix(".pkl")
+_CACHE_PATH = Path(__file__).resolve().parents[1] / "cache" / "embedding.pkl"
 _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
 def _load_embedding_cache() -> dict[str, np.ndarray]:
     """埋め込みキャッシュをファイルから1回だけ読み込む。"""
     if not _CACHE_PATH.exists():
-        if not _LEGACY_CACHE_PATH.exists():
-            return {}
+        return {}
 
-        with _LEGACY_CACHE_PATH.open("rb") as cache_file:
-            raw_cache = pickle.load(cache_file)
-    else:
-        with _CACHE_PATH.open("r", encoding="utf-8") as cache_file:
-            raw_cache = json.load(cache_file)
+    with _CACHE_PATH.open("rb") as cache_file:
+        raw_cache = pickle.load(cache_file)
 
     cache: dict[str, np.ndarray] = {}
     for text, embedding in raw_cache.items():
@@ -37,13 +31,8 @@ def _load_embedding_cache() -> dict[str, np.ndarray]:
 def _save_embedding_cache() -> None:
     """メモリ上の埋め込みキャッシュをファイルへ1回だけ書き戻す。"""
     tmp_path = _CACHE_PATH.with_suffix(".tmp")
-    serializable_cache = {
-        text: embedding.astype(float).tolist()
-        for text, embedding in _EMBEDDING_CACHE.items()
-    }
-
-    with tmp_path.open("w", encoding="utf-8") as cache_file:
-        json.dump(serializable_cache, cache_file, ensure_ascii=False)
+    with tmp_path.open("wb") as cache_file:
+        pickle.dump(_EMBEDDING_CACHE, cache_file, protocol=pickle.HIGHEST_PROTOCOL)
     tmp_path.replace(_CACHE_PATH)
 
 
