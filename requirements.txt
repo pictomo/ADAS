@@ -3,6 +3,7 @@ icecream
 
 # main
 python-dotenv
+faiss-cpu
 
 # project default
 numpy
