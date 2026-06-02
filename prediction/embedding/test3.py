@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import numpy as np
-
 from util.data import build_entity_lookup, load_data, make_text
 from util.vec import cos_sim, dist, str2vec
 
@@ -64,23 +62,6 @@ def pick_pairs(
     return matched_pairs, negative_pairs
 
 
-def vectorize_entity(
-    table_name: str,
-    entity_id: int,
-    row: dict[str, str],
-    cache: dict[tuple[str, int], np.ndarray],
-):
-    """エンティティを埋め込み化し、同じ ID の再計算はキャッシュで避ける。"""
-    cache_key = (table_name, entity_id)
-    if cache_key not in cache:
-        text = make_text(row)
-        vec = str2vec(text)
-        cache[cache_key] = vec
-        # キャッシュ登録のみ（詳細ログは抑制してシンプルな出力にする）
-
-    return cache[cache_key]
-
-
 if __name__ == "__main__":
     # データファイルの場所を確定して、以降の処理では中身だけを扱う。
     root = Path(__file__).resolve().parents[2]
@@ -103,9 +84,6 @@ if __name__ == "__main__":
         ("non_match", pair) for pair in negative_pairs
     ]
 
-    # 同じ ID の埋め込みを繰り返し作らないように、ベクトルをキャッシュする。
-    vector_cache: dict[tuple[str, int], np.ndarray] = {}
-
     # ペアごとの指標を、正例と負例で分けて蓄積する。
     match_results: list[tuple[float, float]] = []
     nonmatch_results: list[tuple[float, float]] = []
@@ -115,8 +93,8 @@ if __name__ == "__main__":
         abt_row = abt_lookup[abt_id]
         buy_row = buy_lookup[buy_id]
 
-        abt_vec = vectorize_entity("Abt", abt_id, abt_row, vector_cache)
-        buy_vec = vectorize_entity("Buy", buy_id, buy_row, vector_cache)
+        abt_vec = str2vec(make_text(abt_row))
+        buy_vec = str2vec(make_text(buy_row))
 
         d = dist(abt_vec, buy_vec)
         cs = cos_sim(abt_vec, buy_vec)

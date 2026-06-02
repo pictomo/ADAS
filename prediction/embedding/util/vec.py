@@ -1,5 +1,8 @@
-from pathlib import Path
+import atexit
+import json
+import pickle
 import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -7,13 +10,61 @@ sys.path.append(str(Path(__file__).resolve().parents[3]))
 
 from llm_provider import client
 
+_CACHE_PATH = Path(__file__).resolve().parents[1] / "cache" / "embedding.json"
+_LEGACY_CACHE_PATH = _CACHE_PATH.with_suffix(".pkl")
+_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-def str2vec(s: str) -> np.ndarray:
+
+def _load_embedding_cache() -> dict[str, np.ndarray]:
+    """埋め込みキャッシュをファイルから1回だけ読み込む。"""
+    if not _CACHE_PATH.exists():
+        if not _LEGACY_CACHE_PATH.exists():
+            return {}
+
+        with _LEGACY_CACHE_PATH.open("rb") as cache_file:
+            raw_cache = pickle.load(cache_file)
+    else:
+        with _CACHE_PATH.open("r", encoding="utf-8") as cache_file:
+            raw_cache = json.load(cache_file)
+
+    cache: dict[str, np.ndarray] = {}
+    for text, embedding in raw_cache.items():
+        cache[str(text)] = np.asarray(embedding, dtype=np.float32)
+
+    return cache
+
+
+def _save_embedding_cache() -> None:
+    """メモリ上の埋め込みキャッシュをファイルへ1回だけ書き戻す。"""
+    tmp_path = _CACHE_PATH.with_suffix(".tmp")
+    serializable_cache = {
+        text: embedding.astype(float).tolist()
+        for text, embedding in _EMBEDDING_CACHE.items()
+    }
+
+    with tmp_path.open("w", encoding="utf-8") as cache_file:
+        json.dump(serializable_cache, cache_file, ensure_ascii=False)
+    tmp_path.replace(_CACHE_PATH)
+
+
+_EMBEDDING_CACHE: dict[str, np.ndarray] = _load_embedding_cache()
+atexit.register(_save_embedding_cache)
+
+
+def str2vec_without_cache(s: str) -> np.ndarray:
     response = client.embeddings.create(
         model="text-embedding-3-small",
         input=s,
     )
     return np.array(response.data[0].embedding, dtype=np.float32)
+
+
+def str2vec(s: str) -> np.ndarray:
+    """永続キャッシュを挟んで文字列を埋め込み化する。"""
+    if s not in _EMBEDDING_CACHE:
+        _EMBEDDING_CACHE[s] = str2vec_without_cache(s)
+
+    return _EMBEDDING_CACHE[s]
 
 
 def vec2norm(vec: np.ndarray) -> float:
