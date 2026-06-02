@@ -20,6 +20,7 @@ numpy==2.4.6
 openai==2.38.0
 packaging==26.2
 pandas==3.0.3
+pandas-stubs==3.0.3.260530
 pycryptodomex==3.23.0
 pydantic==2.13.4
 pydantic_core==2.46.4

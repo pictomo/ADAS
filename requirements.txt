@@ -10,6 +10,7 @@ numpy
 tqdm
 types-tqdm
 pandas
+pandas-stubs
 openai
 backoff
 scipy
