@@ -17,13 +17,13 @@ from pathlib import Path
 import faiss
 import numpy as np
 
-# プロジェクトルート (ADAS/) を sys.path に追加して prediction パッケージを解決する
-sys.path.append(str(Path(__file__).resolve().parents[2]))
+# prediction/ を sys.path に追加して util パッケージを解決する
+sys.path.append(str(Path(__file__).resolve().parent))
 
-from prediction.embedding.util.data import load_data, make_text
-from prediction.embedding.util.vec import str2vec
+from util.data import load_data, make_text
+from util.vec import str2vec
 
-DATASET_DIR = Path(__file__).resolve().parents[2] / "dataset" / "Abt-Buy"
+DATASET_DIR = Path(__file__).resolve().parents[1] / "dataset" / "Abt-Buy"
 OUTPUT_PATH = DATASET_DIR / "abt_buy_candidates.csv"
 TOP_K = 10
 

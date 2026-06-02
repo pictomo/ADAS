@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.append(str(Path(__file__).resolve().parents[3]))
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from llm_provider import client
 

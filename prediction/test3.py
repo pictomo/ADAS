@@ -64,7 +64,7 @@ def pick_pairs(
 
 if __name__ == "__main__":
     # データファイルの場所を確定して、以降の処理では中身だけを扱う。
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[1]
     abt_path = root / "dataset" / "Abt-Buy" / "Abt.csv"
     buy_path = root / "dataset" / "Abt-Buy" / "Buy.csv"
     mapping_path = root / "dataset" / "Abt-Buy" / "abt_buy_perfectMapping.csv"
