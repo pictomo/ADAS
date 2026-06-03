@@ -41,7 +41,7 @@ FORMAT_INST = (
 ROLE_DESC = lambda role: f"You are a {role}."
 # デバッグ出力フラグ（--debug フラグで ON になる）
 PRINT_LLM_DEBUG = False
-# 探索モードフラグ（True=検証データで探索、False=テストデータで評価）
+# 探索モードフラグ（evaluate_forward_fn が split に応じて自動更新する）
 SEARCHING_MODE = True
 # エージェント評価用モデル（__main__で args.eval_model から上書きされる）
 EVAL_MODEL = "gpt-5-nano"
@@ -118,7 +118,6 @@ class LLMAgentBase:
     """LLMエージェントの基底クラス。
 
     プロンプトの構築、GPTへの問い合わせ、応答のパースを担当する。
-    各エージェントは役割・温度・出力フィールドをカスタマイズできる。
 
     Attributes:
         output_fields (list): LLMに出力させるフィールド名のリスト（例: ['thinking', 'answer']）。
@@ -275,11 +274,13 @@ def search(args):
     評価を繰り返し、進化的にアーカイブを拡張していく。
     結果は各世代ごとにJSONファイルに保存される。
 
+    n_generation < max_gen の場合は探索をスキップする（test評価のみが目的のケース）。
+    fitness が欠けているエントリがある場合はその評価のみを行い、生成は次回実行に委ねる。
+
     Args:
         args: コマンドライン引数（モデル名、世代数、保存先など）。
     """
-    # 既存のアーカイブがあれば読み込み、なければ初期アーカイブで開始
-    file_path = os.path.join(args.save_dir, f"{args.expr_name}_run_archive.json")
+    file_path = os.path.join(args.save_dir, f"{args.expr_name}.json")
     if os.path.exists(file_path):
         with open(file_path, "r") as json_file:
             archive = json.load(json_file)
@@ -295,7 +296,7 @@ def search(args):
             )
             label_pairs = []
             try:
-                label_pairs = evaluate_forward_fn(args, incomplete["code"])
+                label_pairs = evaluate_forward_fn(args, incomplete["code"], "val")
             except Exception as e:
                 print(f"Re-evaluation failed: {e}")
             if label_pairs and compute_f1(label_pairs) >= 0.01:
@@ -315,34 +316,46 @@ def search(args):
         archive = get_init_archive()
         start = 0
 
-    for solution in archive:
-        if "fitness" in solution:
-            continue
+    # 現在の最大世代番号が n_generation を超えていれば探索をスキップ
+    gen_nums = [
+        e["generation"] for e in archive if isinstance(e.get("generation"), int)
+    ]
+    max_gen = max(gen_nums) if gen_nums else 0
+    if max_gen > args.n_generation:
+        return
 
-        solution["generation"] = "initial"
-        print(f"============Initial Archive: {solution['name']}=================")
+    # fitness が欠けているエントリがあれば評価のみ行い、生成は次回実行に委ねる
+    fitness_missing = any("fitness" not in e for e in archive)
 
-        # 評価前にアーカイブを書き出し（クラッシュ時にどのエージェントを評価中か確認可能）
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        with open(file_path, "w") as json_file:
-            json.dump(archive, json_file, indent=4)
+    if fitness_missing:
+        for solution in archive:
+            if "fitness" in solution:
+                continue
 
-        try:
-            label_pairs = evaluate_forward_fn(args, solution["code"])
-        except Exception as e:
-            print("During evaluating initial archive:")
-            print(e)
-            continue
+            solution["generation"] = "initial"
+            print(f"============Initial Archive: {solution['name']}=================")
 
-        # ブートストラップ信頼区間を算出して適応度として保存
-        fitness_str = bootstrap_confidence_interval(label_pairs)
-        solution["fitness"] = fitness_str
+            # 評価前にアーカイブを書き出し（クラッシュ時にどのエージェントを評価中か確認可能）
+            os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
+            with open(file_path, "w") as json_file:
+                json.dump(archive, json_file, indent=4)
 
-        # fitness追加後に再度書き出し
-        with open(file_path, "w") as json_file:
-            json.dump(archive, json_file, indent=4)
+            try:
+                label_pairs = evaluate_forward_fn(args, solution["code"], "val")
+            except Exception as e:
+                print("During evaluating initial archive:")
+                print(e)
+                continue
 
-    # 各世代で新しいエージェントを提案・リフレクション・評価するループ
+            fitness_str = bootstrap_confidence_interval(label_pairs)
+            solution["fitness"] = fitness_str
+
+            with open(file_path, "w") as json_file:
+                json.dump(archive, json_file, indent=4)
+
+        return
+
+    # fitness が全て揃っている場合のみ新しいエージェントを生成する
     for n in range(start, args.n_generation):
         print(f"============Generation {n + 1}=================")
         # メタプロンプトを構築して新しいエージェントを提案させる
@@ -374,7 +387,7 @@ def search(args):
         # 評価前にアーカイブに追加して書き出し（クラッシュ時にどのコードを評価中か確認可能）
         next_solution["generation"] = n + 1
         archive.append(next_solution)
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
         with open(file_path, "w") as json_file:
             json.dump(archive, json_file, indent=4)
 
@@ -382,7 +395,7 @@ def search(args):
         label_pairs = []
         for _ in range(args.debug_max):
             try:
-                label_pairs = evaluate_forward_fn(args, archive[-1]["code"])
+                label_pairs = evaluate_forward_fn(args, archive[-1]["code"], "val")
                 if compute_f1(label_pairs) < 0.01 and SEARCHING_MODE:
                     raise Exception("All 0 F1")
                 break
@@ -425,7 +438,6 @@ def search(args):
         if "reflection" in archive[-1]:
             del archive[-1]["reflection"]
 
-        # save results
         with open(file_path, "w") as json_file:
             json.dump(archive, json_file, indent=4)
 
@@ -433,67 +445,48 @@ def search(args):
 def evaluate(args):
     """探索済みアーカイブの全エージェントをテストデータで評価する。
 
-    探索フェーズで見つけた各エージェントをテストデータに対して評価し、
-    結果を別のJSONファイルに保存する。
+    test_fitness が未設定のエントリのみ評価し、結果を同一ファイルに上書き保存する。
 
     Args:
         args: コマンドライン引数。
     """
-    # 探索アーカイブと評価アーカイブのファイルパスを設定
-    file_path = os.path.join(args.save_dir, f"{args.expr_name}_run_archive.json")
-    eval_file_path = (
-        os.path.join(args.save_dir, f"{args.expr_name}_run_archive.json").removesuffix(
-            ".json"
-        )
-        + "_evaluate.json"
-    )
+    file_path = os.path.join(args.save_dir, f"{args.expr_name}.json")
     with open(file_path, "r") as json_file:
         archive = json.load(json_file)
-    eval_archive = []
-    if os.path.exists(eval_file_path):
-        with open(eval_file_path, "r") as json_file:
-            eval_archive = json.load(json_file)
 
-    # アーカイブ内の各エージェントを順番にテスト評価
-    current_idx = 0
-    while current_idx < len(archive):
-        with open(file_path, "r") as json_file:
-            archive = json.load(json_file)
-        if current_idx < len(eval_archive):
-            current_idx += 1
+    for sol in archive:
+        if "test_fitness" in sol:
             continue
-        sol = archive[current_idx]
-        print(f"current_gen: {sol['generation']}, current_idx: {current_idx}")
-        current_idx += 1
+        print(f"current_gen: {sol['generation']}, name: {sol.get('name', '?')}")
         try:
-            label_pairs = evaluate_forward_fn(args, sol["code"])
+            label_pairs = evaluate_forward_fn(args, sol["code"], "test")
         except Exception as e:
             print(e)
             continue
-        fitness_str = bootstrap_confidence_interval(label_pairs)
-        sol["test_fitness"] = fitness_str
-        eval_archive.append(sol)
+        sol["test_fitness"] = bootstrap_confidence_interval(label_pairs)
 
-        # save results
-        os.makedirs(os.path.dirname(eval_file_path), exist_ok=True)
-        with open(eval_file_path, "w") as json_file:
-            json.dump(eval_archive, json_file, indent=4)
+        with open(file_path, "w") as json_file:
+            json.dump(archive, json_file, indent=4)
 
 
-def evaluate_forward_fn(args, forward_str):
+def evaluate_forward_fn(args, forward_str, split="val"):
     """エージェントのforward関数を動的に定義し、EMデータセットで評価する。
 
     文字列として渡されたforward関数をexecで動的に定義し、
     AgentSystemにセットして、マルチスレッドでEMタスク群を評価する。
-    探索モードでは検証データ、評価モードではテストデータを使用する。
+    split="val" では検証データ、split="test" ではテストデータを使用する。
 
     Args:
         args: コマンドライン引数（データサイズ、ワーカー数など）。
         forward_str (str): forward()関数のソースコード文字列。
+        split (str): 使用するデータ分割 ("val" または "test")。
 
     Returns:
         list[tuple]: 各問題の (y_true: bool, y_pred: bool) ペアのリスト。
     """
+    global SEARCHING_MODE
+    SEARCHING_MODE = split == "val"
+
     # forward関数を動的に定義してAgentSystemにセット
     namespace = {}
     exec(forward_str, globals(), namespace)
@@ -505,8 +498,8 @@ def evaluate_forward_fn(args, forward_str):
         raise AssertionError(f"{func} is not callable")
     setattr(AgentSystem, "forward", func)
 
-    # 探索/テストモードに応じてデータを読み込む（前処理済みCSVから）
-    examples = get_all_examples("val" if SEARCHING_MODE else "test")
+    # split に応じてデータを読み込む（前処理済みCSVから）
+    examples = get_all_examples(split)
     examples = examples * args.n_repeat
 
     questions = [example["inputs"] for example in examples]
@@ -561,14 +554,17 @@ if __name__ == "__main__":
     parser.add_argument("--multiprocessing", action="store_true", default=True)
     parser.add_argument("--max_workers", type=int, default=48)
     parser.add_argument("--save_dir", type=str, default="results/")
-    parser.add_argument("--expr_name", type=str, default="em_gpt5mini_results")
+    parser.add_argument("--expr_name", type=str, default="em")
     parser.add_argument("--n_generation", type=int, default=15)
     parser.add_argument("--debug_max", type=int, default=3)
     parser.add_argument("--model", type=str, default="gpt-5.4-mini")
     parser.add_argument("--eval_model", type=str, default="gpt-5-nano")
-    parser.add_argument("--eval_reasoning_effort", type=str, default="minimal")
     parser.add_argument("--meta_reasoning_effort", type=str, default="none")
+    parser.add_argument("--eval_reasoning_effort", type=str, default="minimal")
     parser.add_argument("--debug", action="store_true", default=False)
+    parser.add_argument(
+        "--no_test_eval", dest="test_eval", action="store_false", default=True
+    )
 
     args = parser.parse_args()
 
@@ -582,5 +578,5 @@ if __name__ == "__main__":
     search(args)
 
     # evaluate
-    SEARCHING_MODE = False
-    evaluate(args)
+    if args.test_eval:
+        evaluate(args)

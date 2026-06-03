@@ -4,7 +4,8 @@
         "name": "Chain-of-Thought",
         "code": "def forward(self, taskInfo):\n    cot_instruction = \"Please think step by step, comparing the two entities field by field (name, description, manufacturer, price), and then decide if they refer to the same real-world product. Output true for match, false for non-match.\"\n    cot_agent = LLMAgentBase(['thinking', 'answer'], 'Chain-of-Thought Agent')\n    thinking, answer = cot_agent([taskInfo], cot_instruction)\n    return answer\n",
         "generation": "initial",
-        "fitness": "95% Bootstrap Confidence Interval: (60.4%, 68.4%), Median: 64.5%"
+        "fitness": "95% Bootstrap Confidence Interval: (60.4%, 68.4%), Median: 64.5%",
+        "test_fitness": "95% Bootstrap Confidence Interval: (62.5%, 82.0%), Median: 73.1%"
     },
     {
         "thought": "While an LLM can arrive at the correct match decision, its reasoning may vary. By repeatedly asking the same question independently, we can generate different reasoning paths. We then combine multiple answers from these Chain-of-Thought (CoT) agents to produce a more accurate final decision through majority voting.",
