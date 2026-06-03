@@ -12,8 +12,17 @@ if __name__ == "__main__":
             reasoning_effort="minimal",
             # temperature=0.2,
             messages=[
-                {"role": "user", "content": "Say 'API is working' in one sentence."}
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant. Reply in JSON format.",
+                },
+                {
+                    "role": "user",
+                    "content": 'Give me a random word. Return as JSON like {"word": "..."}',
+                },
             ],
+            max_completion_tokens=1024,
+            response_format={"type": "json_object"},
         )
         print(response.choices[0].message.content)
     except Exception as e:
