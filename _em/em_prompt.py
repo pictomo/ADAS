@@ -32,16 +32,16 @@ COT = {
 }
 
 # Self-Consistency with CoT エージェント
-# 高温度設定で複数のCoTエージェントを実行し、多数決で最終判定を決定する手法
+# 複数のCoTエージェントを独立実行し、多数決で最終判定を決定する手法
 COT_SC = {
-    "thought": "While an LLM can arrive at the correct match decision, its reasoning may vary. By repeatedly asking the same question with high temperature settings, we can generate different reasoning paths. We then combine multiple answers from these Chain-of-Thought (CoT) agents to produce a more accurate final decision through majority voting.",
+    "thought": "While an LLM can arrive at the correct match decision, its reasoning may vary. By repeatedly asking the same question independently, we can generate different reasoning paths. We then combine multiple answers from these Chain-of-Thought (CoT) agents to produce a more accurate final decision through majority voting.",
     "name": "Self-Consistency with Chain-of-Thought",
     "code": """def forward(self, taskInfo):
     cot_instruction = "Please think step by step and then decide if the two entities refer to the same real-world product. Output true for match, false for non-match."
     N = 5
 
-    # 多様な推論経路を生成するため高温度設定で複数エージェントを初期化
-    cot_agents = [LLMAgentBase(['thinking', 'answer'], 'Chain-of-Thought Agent', temperature=0.8) for _ in range(N)]
+    # 独立した複数エージェントで多様な推論経路を生成
+    cot_agents = [LLMAgentBase(['thinking', 'answer'], 'Chain-of-Thought Agent') for _ in range(N)]
 
     from collections import Counter
     def majority_voting(answers):
@@ -103,10 +103,10 @@ LLM_debate = {
 
     # EM向けのドメイン専門家ロールを設定
     roles = ['E-commerce Product Expert', 'Data Quality Analyst', 'Consumer Electronics Specialist']
-    debate_agents = [LLMAgentBase(['thinking', 'answer'], 'Debate Agent', temperature=0.8, role=role) for role in roles]
+    debate_agents = [LLMAgentBase(['thinking', 'answer'], 'Debate Agent', role=role) for role in roles]
 
     final_decision_instruction = "Given all the above reasoning and match/non-match decisions, weigh the evidence carefully and provide a final answer."
-    final_decision_agent = LLMAgentBase(['thinking', 'answer'], 'Final Decision Agent', temperature=0.1)
+    final_decision_agent = LLMAgentBase(['thinking', 'answer'], 'Final Decision Agent')
 
     max_round = 2
     all_thinking = [[] for _ in range(max_round)]
@@ -142,7 +142,7 @@ QD = {
     cot_agent = LLMAgentBase(['thinking', 'answer'], 'Chain-of-Thought Agent')
 
     final_decision_instruction = "Given all the above analyses and match/non-match decisions, reason over them carefully and provide a final answer."
-    final_decision_agent = LLMAgentBase(['thinking', 'answer'], 'Final Decision Agent', temperature=0.1)
+    final_decision_agent = LLMAgentBase(['thinking', 'answer'], 'Final Decision Agent')
 
     N_max = 3
     cot_inputs = [taskInfo]
@@ -254,15 +254,14 @@ FORMAT_INST = lambda request_keys: f"Reply EXACTLY with the following JSON forma
 ROLE_DESC = lambda role: f"You are a {role}."
 
 @backoff.on_exception(backoff.expo, openai.RateLimitError)
-def get_json_response_from_gpt(msg, model, system_message, temperature=0.5):
+def get_json_response_from_gpt(msg, model, system_message):
     response = client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": system_message},
             {"role": "user", "content": msg},
         ],
-        temperature=temperature,
-        reasoning_effort="none",
+        reasoning_effort=EVAL_REASONING_EFFORT,
         max_completion_tokens=1024,
         response_format={"type": "json_object"}
     )
@@ -279,16 +278,14 @@ class LLMAgentBase:
     - agent_name (str): Name of the agent.
     - role (str): Role description for the agent.
     - model (str): Model to be used. (option. Keep it default.)
-    - temperature (float): Sampling temperature.
     - id (str): Unique identifier for the agent instance.
     \"""
 
-    def __init__(self, output_fields: list, agent_name: str, role='helpful assistant', model=None, temperature=0.5) -> None:
+    def __init__(self, output_fields: list, agent_name: str, role='helpful assistant', model=None) -> None:
         self.output_fields = output_fields
         self.agent_name = agent_name
         self.role = role
         self.model = model if model is not None else '[EVAL_MODEL]'
-        self.temperature = temperature
         self.id = random_id()
 
     def generate_prompt(self, input_infos, instruction) -> str:
@@ -337,7 +334,7 @@ class LLMAgentBase:
 
     def query(self, input_infos: list, instruction, iteration_idx=-1) -> list[Info]:
         system_prompt, prompt = self.generate_prompt(input_infos, instruction)
-        response_json = get_json_response_from_gpt(prompt, self.model, system_prompt, self.temperature)
+        response_json = get_json_response_from_gpt(prompt, self.model, system_prompt)
 
         output_infos = []
         for key, value in response_json.items():
@@ -372,7 +369,7 @@ class AgentArchitecture:
         pass
 ```
 # Model Constraints
-The LLMAgentBase calls use model `[EVAL_MODEL]` with `reasoning_effort="none"` (minimal internal chain-of-thought) and `max_completion_tokens=1024`. Keep these constraints in mind:
+The LLMAgentBase calls use model `[EVAL_MODEL]` with `reasoning_effort="[EVAL_REASONING_EFFORT]"` and `max_completion_tokens=1024`. Keep these constraints in mind:
 - **Prefer 2–3 output fields per LLMAgentBase call.** More fields risk incomplete JSON responses, causing missing answers.
 - **Avoid long context chains.** The model has limited reasoning capacity; simpler, focused prompts work better than verbose multi-step ones.
 - **Do not hardcode a model name.** Leave `model=None` to use the default.
@@ -394,7 +391,7 @@ Here is an example of the output format for the next agent architecture:
 [EXAMPLE]
 
 You must use the exact function interface used above. You need to specify the instruction, input information, and the required output fields for various LLM agents to do their specific part of the architecture.
-Also, it could be helpful to set the LLM's role and temperature to further control the LLM's response. Note that the LLMAgentBase() will automatically parse the output and return a list of "Infos". You can get the content by Infos.content.
+Also, it could be helpful to set the LLM's role to further control the LLM's response. Note that the LLMAgentBase() will automatically parse the output and return a list of "Infos". You can get the content by Infos.content.
 DO NOT FORGET the taskInfo input to LLM if you think it is needed, otherwise LLM will not know about the task.
 
 ## WRONG Implementation examples:
@@ -507,15 +504,18 @@ def get_init_archive():
     return [COT, COT_SC, Reflexion, LLM_debate, QD, Role_Assignment]
 
 
-def get_prompt(current_archive, eval_model: str, adaptive=False):
+def get_prompt(
+    current_archive, eval_model: str, eval_reasoning_effort: str, adaptive=False
+):
     """探索用のメタプロンプトを生成する。
 
-    メタプロンプトテンプレート(base)にアーカイブ・出力例・評価モデル名を埋め込み、
+    メタプロンプトテンプレート(base)にアーカイブ・出力例・評価モデル名・推論量を埋め込み、
     LLMに新しいエージェントアーキテクチャを提案させるためのプロンプトを構築する。
 
     Args:
         current_archive (list[dict]): これまでに発見されたエージェントのリスト。
         eval_model (str): エージェント評価に使用するモデル名。[EVAL_MODEL] プレースホルダに埋め込む。
+        eval_reasoning_effort (str): 評価モデルの推論量。[EVAL_REASONING_EFFORT] プレースホルダに埋め込む。
         adaptive (bool): 適応モードフラグ（現在未使用）。
 
     Returns:
@@ -526,6 +526,7 @@ def get_prompt(current_archive, eval_model: str, adaptive=False):
     prompt = base.replace("[ARCHIVE]", archive_str)
     prompt = prompt.replace("[EXAMPLE]", json.dumps(EXAMPLE))
     prompt = prompt.replace("[EVAL_MODEL]", eval_model)
+    prompt = prompt.replace("[EVAL_REASONING_EFFORT]", eval_reasoning_effort)
     return system_prompt, prompt
 
 

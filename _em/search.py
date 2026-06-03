@@ -45,21 +45,24 @@ PRINT_LLM_DEBUG = False
 SEARCHING_MODE = True
 # エージェント評価用モデル（__main__で args.eval_model から上書きされる）
 EVAL_MODEL = "gpt-5-nano"
+# エージェント評価用推論量（--eval_reasoning_effort から上書きされる）
+EVAL_REASONING_EFFORT = "minimal"
+# メタLLM用推論量（--meta_reasoning_effort から上書きされる）
+META_REASONING_EFFORT = "none"
 
 
 @backoff.on_exception(backoff.expo, openai.RateLimitError, max_tries=10)
-def get_json_response_from_gpt(msg, model, system_message, temperature=0.5):
+def get_json_response_from_gpt(msg, model, system_message):
     """GPTモデルからJSON形式のレスポンスを取得する。
 
     レートリミット時には指数バックオフで自動リトライする。
     単一メッセージの問い合わせに使用する。
-    reasoning_effort="none" を指定して temperature との互換性を確保する。
+    EVAL_REASONING_EFFORT でエージェント評価の推論量を制御する。
 
     Args:
         msg (str): ユーザーメッセージ。
         model (str): 使用するGPTモデル名。
         system_message (str): システムメッセージ。
-        temperature (float): サンプリング温度。
 
     Returns:
         dict: パース済みのJSONディクショナリ。
@@ -70,8 +73,7 @@ def get_json_response_from_gpt(msg, model, system_message, temperature=0.5):
             {"role": "system", "content": system_message},
             {"role": "user", "content": msg},
         ],
-        temperature=temperature,
-        reasoning_effort="none",
+        reasoning_effort=EVAL_REASONING_EFFORT,
         max_completion_tokens=4096,
         response_format={"type": "json_object"},
     )
@@ -83,17 +85,17 @@ def get_json_response_from_gpt(msg, model, system_message, temperature=0.5):
 
 
 @backoff.on_exception(backoff.expo, openai.RateLimitError, max_tries=10)
-def get_json_response_from_gpt_reflect(msg_list, model, temperature=0.8):
+def get_json_response_from_gpt_reflect(msg_list, model):
     """GPTモデルからリフレクション用のJSONレスポンスを取得する。
 
     複数メッセージの会話履歴（msg_list）を渡して、リフレクションや
     デバッグのための多ターン対話に使用する。
     レートリミット時には指数バックオフで自動リトライする。
+    META_REASONING_EFFORT でメタLLMの推論量を制御する。
 
     Args:
         msg_list (list[dict]): メッセージ履歴のリスト（role/contentの辞書）。
         model (str): 使用するGPTモデル名。
-        temperature (float): サンプリング温度。
 
     Returns:
         dict: パース済みのJSONディクショナリ。
@@ -101,8 +103,7 @@ def get_json_response_from_gpt_reflect(msg_list, model, temperature=0.8):
     response = client.chat.completions.create(
         model=model,
         messages=msg_list,
-        temperature=temperature,
-        reasoning_effort="none",
+        reasoning_effort=META_REASONING_EFFORT,
         max_completion_tokens=4096,
         response_format={"type": "json_object"},
     )
@@ -124,7 +125,6 @@ class LLMAgentBase:
         agent_name (str): エージェントの名前。
         role (str): LLMに与える役割の説明。
         model (str): 使用するGPTモデル名。
-        temperature (float): サンプリング温度。
         id (str): エージェントインスタンスの一意識別子。
     """
 
@@ -134,7 +134,6 @@ class LLMAgentBase:
         agent_name: str,
         role="helpful assistant",
         model=None,
-        temperature=0.5,
     ) -> None:
         """LLMエージェントを初期化する。
 
@@ -143,13 +142,11 @@ class LLMAgentBase:
             agent_name (str): エージェントの名前。
             role (str): LLMに与える役割の説明。
             model (str | None): 使用するGPTモデル名。None の場合は EVAL_MODEL を使用。
-            temperature (float): サンプリング温度。
         """
         self.output_fields = output_fields
         self.agent_name = agent_name
         self.role = role
         self.model = model if model is not None else EVAL_MODEL
-        self.temperature = temperature
         # 各インスタンスに一意のIDを付与
         self.id = random_id()
 
@@ -220,7 +217,7 @@ class LLMAgentBase:
         response_json: dict = {}
         try:
             response_json = get_json_response_from_gpt(
-                prompt, self.model, system_prompt, self.temperature
+                prompt, self.model, system_prompt
             )
             assert len(response_json) == len(
                 self.output_fields
@@ -287,9 +284,15 @@ def search(args):
         with open(file_path, "r") as json_file:
             archive = json.load(json_file)
         # 評価前保存で中断された未完成エントリ（fitness無し生成エージェント）を再評価して完了させる
-        if archive and isinstance(archive[-1].get("generation"), int) and "fitness" not in archive[-1]:
+        if (
+            archive
+            and isinstance(archive[-1].get("generation"), int)
+            and "fitness" not in archive[-1]
+        ):
             incomplete = archive[-1]
-            print(f"Resuming evaluation of incomplete entry for generation {incomplete['generation']}")
+            print(
+                f"Resuming evaluation of incomplete entry for generation {incomplete['generation']}"
+            )
             label_pairs = []
             try:
                 label_pairs = evaluate_forward_fn(args, incomplete["code"])
@@ -343,7 +346,7 @@ def search(args):
     for n in range(start, args.n_generation):
         print(f"============Generation {n + 1}=================")
         # メタプロンプトを構築して新しいエージェントを提案させる
-        system_prompt, prompt = get_prompt(archive, EVAL_MODEL)
+        system_prompt, prompt = get_prompt(archive, EVAL_MODEL, EVAL_REASONING_EFFORT)
         msg_list = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
@@ -563,15 +566,17 @@ if __name__ == "__main__":
     parser.add_argument("--debug_max", type=int, default=3)
     parser.add_argument("--model", type=str, default="gpt-5.4-mini")
     parser.add_argument("--eval_model", type=str, default="gpt-5-nano")
+    parser.add_argument("--eval_reasoning_effort", type=str, default="minimal")
+    parser.add_argument("--meta_reasoning_effort", type=str, default="none")
     parser.add_argument("--debug", action="store_true", default=False)
 
     args = parser.parse_args()
 
-    # デバッグ出力フラグをグローバル変数に反映（EVAL_MODEL と同様に global が必要）
+    # グローバル変数に反映（exec() 経由の生成エージェントコードから args にアクセスできないため）
     PRINT_LLM_DEBUG = args.debug
-    # 評価用モデルをグローバル変数に反映（LLMAgentBase のデフォルトとして使用される）
-    # ※ exec() 経由で呼ばれる生成エージェントコードから args にアクセスできないため global が必要
     EVAL_MODEL = args.eval_model
+    EVAL_REASONING_EFFORT = args.eval_reasoning_effort
+    META_REASONING_EFFORT = args.meta_reasoning_effort
 
     # search
     search(args)
