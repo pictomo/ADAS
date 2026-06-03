@@ -9,7 +9,7 @@ from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor
 
 import backoff
-import numpy as np
+
 import openai
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -39,15 +39,15 @@ FORMAT_INST = (
 )
 # LLMの役割記述テンプレート
 ROLE_DESC = lambda role: f"You are a {role}."
-SYSTEM_MSG = ""
-
-# デバッグ出力フラグ（診断時は True に変更）
-PRINT_LLM_DEBUG = True
+# デバッグ出力フラグ（--debug フラグで ON になる）
+PRINT_LLM_DEBUG = False
 # 探索モードフラグ（True=検証データで探索、False=テストデータで評価）
 SEARCHING_MODE = True
+# エージェント評価用モデル（__main__で args.eval_model から上書きされる）
+EVAL_MODEL = "gpt-5-nano"
 
 
-@backoff.on_exception(backoff.expo, openai.RateLimitError)
+@backoff.on_exception(backoff.expo, openai.RateLimitError, max_tries=10)
 def get_json_response_from_gpt(msg, model, system_message, temperature=0.5):
     """GPTモデルからJSON形式のレスポンスを取得する。
 
@@ -82,7 +82,7 @@ def get_json_response_from_gpt(msg, model, system_message, temperature=0.5):
     return json_dict
 
 
-@backoff.on_exception(backoff.expo, openai.RateLimitError)
+@backoff.on_exception(backoff.expo, openai.RateLimitError, max_tries=10)
 def get_json_response_from_gpt_reflect(msg_list, model, temperature=0.8):
     """GPTモデルからリフレクション用のJSONレスポンスを取得する。
 
@@ -133,7 +133,7 @@ class LLMAgentBase:
         output_fields: list,
         agent_name: str,
         role="helpful assistant",
-        model="gpt-5.4-mini",
+        model=None,
         temperature=0.5,
     ) -> None:
         """LLMエージェントを初期化する。
@@ -142,13 +142,13 @@ class LLMAgentBase:
             output_fields (list): LLMに出力させるフィールド名のリスト。
             agent_name (str): エージェントの名前。
             role (str): LLMに与える役割の説明。
-            model (str): 使用するGPTモデル名。
+            model (str | None): 使用するGPTモデル名。None の場合は EVAL_MODEL を使用。
             temperature (float): サンプリング温度。
         """
         self.output_fields = output_fields
         self.agent_name = agent_name
         self.role = role
-        self.model = model
+        self.model = model if model is not None else EVAL_MODEL
         self.temperature = temperature
         # 各インスタンスに一意のIDを付与
         self.id = random_id()
@@ -286,7 +286,25 @@ def search(args):
     if os.path.exists(file_path):
         with open(file_path, "r") as json_file:
             archive = json.load(json_file)
-        if "generation" in archive[-1] and isinstance(archive[-1]["generation"], int):
+        # 評価前保存で中断された未完成エントリ（fitness無し生成エージェント）を再評価して完了させる
+        if archive and isinstance(archive[-1].get("generation"), int) and "fitness" not in archive[-1]:
+            incomplete = archive[-1]
+            print(f"Resuming evaluation of incomplete entry for generation {incomplete['generation']}")
+            label_pairs = []
+            try:
+                label_pairs = evaluate_forward_fn(args, incomplete["code"])
+            except Exception as e:
+                print(f"Re-evaluation failed: {e}")
+            if label_pairs and compute_f1(label_pairs) >= 0.01:
+                fitness_str = bootstrap_confidence_interval(label_pairs)
+                archive[-1]["fitness"] = fitness_str
+                for key in ("debug_thought", "reflection"):
+                    archive[-1].pop(key, None)
+            else:
+                archive.pop()
+            with open(file_path, "w") as json_file:
+                json.dump(archive, json_file, indent=4)
+        if archive and isinstance(archive[-1].get("generation"), int):
             start = archive[-1]["generation"]
         else:
             start = 0
@@ -300,6 +318,12 @@ def search(args):
 
         solution["generation"] = "initial"
         print(f"============Initial Archive: {solution['name']}=================")
+
+        # 評価前にアーカイブを書き出し（クラッシュ時にどのエージェントを評価中か確認可能）
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "w") as json_file:
+            json.dump(archive, json_file, indent=4)
+
         try:
             label_pairs = evaluate_forward_fn(args, solution["code"])
         except Exception as e:
@@ -311,8 +335,7 @@ def search(args):
         fitness_str = bootstrap_confidence_interval(label_pairs)
         solution["fitness"] = fitness_str
 
-        # save results
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        # fitness追加後に再度書き出し
         with open(file_path, "w") as json_file:
             json.dump(archive, json_file, indent=4)
 
@@ -320,7 +343,7 @@ def search(args):
     for n in range(start, args.n_generation):
         print(f"============Generation {n + 1}=================")
         # メタプロンプトを構築して新しいエージェントを提案させる
-        system_prompt, prompt = get_prompt(archive)
+        system_prompt, prompt = get_prompt(archive, EVAL_MODEL)
         msg_list = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
@@ -345,18 +368,25 @@ def search(args):
             print(e)
             continue
 
+        # 評価前にアーカイブに追加して書き出し（クラッシュ時にどのコードを評価中か確認可能）
+        next_solution["generation"] = n + 1
+        archive.append(next_solution)
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "w") as json_file:
+            json.dump(archive, json_file, indent=4)
+
         # 提案されたエージェントの評価（失敗時はデバッグを試みる）
         label_pairs = []
         for _ in range(args.debug_max):
             try:
-                label_pairs = evaluate_forward_fn(args, next_solution["code"])
+                label_pairs = evaluate_forward_fn(args, archive[-1]["code"])
                 if compute_f1(label_pairs) < 0.01 and SEARCHING_MODE:
                     raise Exception("All 0 F1")
                 break
             except Exception as e:
                 print("During evaluation:")
                 print(e)
-                msg_list.append({"role": "assistant", "content": str(next_solution)})
+                msg_list.append({"role": "assistant", "content": str(archive[-1])})
                 msg_list.append(
                     {
                         "role": "user",
@@ -367,27 +397,32 @@ def search(args):
                     next_solution = get_json_response_from_gpt_reflect(
                         msg_list, args.model
                     )
+                    next_solution["generation"] = n + 1
+                    archive[-1] = next_solution
+                    with open(file_path, "w") as json_file:
+                        json.dump(archive, json_file, indent=4)
                 except Exception as e:
                     print("During LLM generate new solution:")
                     print(e)
                     continue
                 continue
+
         if not label_pairs:
+            # 評価が全て失敗した場合はアーカイブから除去して保存
+            archive.pop()
+            with open(file_path, "w") as json_file:
+                json.dump(archive, json_file, indent=4)
             continue
 
-        # 適応度を算出し、不要なフィールドを除去してアーカイブに追加
+        # 適応度を算出し、不要なフィールドを除去して最終保存
         fitness_str = bootstrap_confidence_interval(label_pairs)
-        next_solution["fitness"] = fitness_str
-        next_solution["generation"] = n + 1
-
-        if "debug_thought" in next_solution:
-            del next_solution["debug_thought"]
-        if "reflection" in next_solution:
-            del next_solution["reflection"]
-        archive.append(next_solution)
+        archive[-1]["fitness"] = fitness_str
+        if "debug_thought" in archive[-1]:
+            del archive[-1]["debug_thought"]
+        if "reflection" in archive[-1]:
+            del archive[-1]["reflection"]
 
         # save results
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
         with open(file_path, "w") as json_file:
             json.dump(archive, json_file, indent=4)
 
@@ -404,7 +439,7 @@ def evaluate(args):
     # 探索アーカイブと評価アーカイブのファイルパスを設定
     file_path = os.path.join(args.save_dir, f"{args.expr_name}_run_archive.json")
     eval_file_path = (
-        str(os.path.join(args.save_dir, f"{args.expr_name}_run_archive.json")).strip(
+        os.path.join(args.save_dir, f"{args.expr_name}_run_archive.json").removesuffix(
             ".json"
         )
         + "_evaluate.json"
@@ -469,7 +504,7 @@ def evaluate_forward_fn(args, forward_str):
 
     # 探索/テストモードに応じてデータを読み込む（前処理済みCSVから）
     examples = get_all_examples("val" if SEARCHING_MODE else "test")
-    examples = examples * args.n_repreat
+    examples = examples * args.n_repeat
 
     questions = [example["inputs"] for example in examples]
     answers = [example["targets"] for example in examples]  # list[bool]
@@ -519,19 +554,26 @@ def evaluate_forward_fn(args, forward_str):
 if __name__ == "__main__":
     # コマンドライン引数のパース
     parser = argparse.ArgumentParser()
-    parser.add_argument("--n_repreat", type=int, default=1)
+    parser.add_argument("--n_repeat", type=int, default=1)
     parser.add_argument("--multiprocessing", action="store_true", default=True)
     parser.add_argument("--max_workers", type=int, default=48)
-    parser.add_argument("--debug", action="store_true", default=True)
     parser.add_argument("--save_dir", type=str, default="results/")
     parser.add_argument("--expr_name", type=str, default="em_gpt5mini_results")
     parser.add_argument("--n_generation", type=int, default=15)
     parser.add_argument("--debug_max", type=int, default=3)
     parser.add_argument("--model", type=str, default="gpt-5.4-mini")
+    parser.add_argument("--eval_model", type=str, default="gpt-5-nano")
+    parser.add_argument("--debug", action="store_true", default=False)
 
     args = parser.parse_args()
+
+    # デバッグ出力フラグをグローバル変数に反映（EVAL_MODEL と同様に global が必要）
+    PRINT_LLM_DEBUG = args.debug
+    # 評価用モデルをグローバル変数に反映（LLMAgentBase のデフォルトとして使用される）
+    # ※ exec() 経由で呼ばれる生成エージェントコードから args にアクセスできないため global が必要
+    EVAL_MODEL = args.eval_model
+
     # search
-    SEARCHING_MODE = True
     search(args)
 
     # evaluate

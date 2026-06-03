@@ -283,11 +283,11 @@ class LLMAgentBase:
     - id (str): Unique identifier for the agent instance.
     \"""
 
-    def __init__(self, output_fields: list, agent_name: str, role='helpful assistant', model='gpt-5.4-mini', temperature=0.5) -> None:
+    def __init__(self, output_fields: list, agent_name: str, role='helpful assistant', model=None, temperature=0.5) -> None:
         self.output_fields = output_fields
         self.agent_name = agent_name
         self.role = role
-        self.model = model
+        self.model = model if model is not None else '[EVAL_MODEL]'
         self.temperature = temperature
         self.id = random_id()
 
@@ -371,6 +371,12 @@ class AgentArchitecture:
         \"""
         pass
 ```
+# Model Constraints
+The LLMAgentBase calls use model `[EVAL_MODEL]` with `reasoning_effort="none"` (minimal internal chain-of-thought) and `max_completion_tokens=1024`. Keep these constraints in mind:
+- **Prefer 2–3 output fields per LLMAgentBase call.** More fields risk incomplete JSON responses, causing missing answers.
+- **Avoid long context chains.** The model has limited reasoning capacity; simpler, focused prompts work better than verbose multi-step ones.
+- **Do not hardcode a model name.** Leave `model=None` to use the default.
+
 # Discovered architecture archive
 Here is the archive of the discovered architectures:
 
@@ -501,14 +507,15 @@ def get_init_archive():
     return [COT, COT_SC, Reflexion, LLM_debate, QD, Role_Assignment]
 
 
-def get_prompt(current_archive, adaptive=False):
+def get_prompt(current_archive, eval_model: str, adaptive=False):
     """探索用のメタプロンプトを生成する。
 
-    メタプロンプトテンプレート(base)にアーカイブと出力例を埋め込み、
+    メタプロンプトテンプレート(base)にアーカイブ・出力例・評価モデル名を埋め込み、
     LLMに新しいエージェントアーキテクチャを提案させるためのプロンプトを構築する。
 
     Args:
         current_archive (list[dict]): これまでに発見されたエージェントのリスト。
+        eval_model (str): エージェント評価に使用するモデル名。[EVAL_MODEL] プレースホルダに埋め込む。
         adaptive (bool): 適応モードフラグ（現在未使用）。
 
     Returns:
@@ -518,6 +525,7 @@ def get_prompt(current_archive, adaptive=False):
     archive_str = f"[{archive_str}]"
     prompt = base.replace("[ARCHIVE]", archive_str)
     prompt = prompt.replace("[EXAMPLE]", json.dumps(EXAMPLE))
+    prompt = prompt.replace("[EVAL_MODEL]", eval_model)
     return system_prompt, prompt
 
 
