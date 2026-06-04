@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 load_dotenv()
 
-from em_prompt import get_init_archive, get_prompt, get_reflexion_prompt
+from em_prompt import BASELINES, get_prompt, get_reflexion_prompt
 
 # OpenAI APIクライアントの初期化
 client = openai.OpenAI()
@@ -33,21 +33,21 @@ from utils import (
 # name: フィールド名, author: 生成者, content: 内容, iteration_idx: イテレーション番号
 Info = namedtuple("Info", ["name", "author", "content", "iteration_idx"])
 
-# LLMの出力フォーマットを指定するテンプレート（JSON形式での応答を強制）
+# LLMの出力フォーマットを指定するテンプレート (JSON形式での応答を強制)
 FORMAT_INST = (
     lambda request_keys: f"""Reply EXACTLY with the following JSON format.\n{str(request_keys)}\nDO NOT MISS ANY REQUEST FIELDS and ensure that your response is a well-formed JSON object!\n"""
 )
 # LLMの役割記述テンプレート
 ROLE_DESC = lambda role: f"You are a {role}."
-# デバッグ出力フラグ（--debug フラグで ON になる）
+# デバッグ出力フラグ (--debug フラグで ON になる)
 PRINT_LLM_DEBUG = False
-# 探索モードフラグ（evaluate_forward_fn が split に応じて自動更新する）
+# 探索モードフラグ (evaluate_forward_fn が split に応じて自動更新する)
 SEARCHING_MODE = True
-# エージェント評価用モデル（__main__で args.eval_model から上書きされる）
+# エージェント評価用モデル (__main__で args.eval_model から上書きされる)
 EVAL_MODEL = "gpt-5-nano"
-# エージェント評価用推論量（--eval_reasoning_effort から上書きされる）
+# エージェント評価用推論量 (--eval_reasoning_effort から上書きされる)
 EVAL_REASONING_EFFORT = "minimal"
-# メタLLM用推論量（--meta_reasoning_effort から上書きされる）
+# メタLLM用推論量 (--meta_reasoning_effort から上書きされる)
 META_REASONING_EFFORT = "none"
 
 
@@ -88,13 +88,13 @@ def get_json_response_from_gpt(msg, model, system_message):
 def get_json_response_from_gpt_reflect(msg_list, model):
     """GPTモデルからリフレクション用のJSONレスポンスを取得する。
 
-    複数メッセージの会話履歴（msg_list）を渡して、リフレクションや
+    複数メッセージの会話履歴 (msg_list) を渡して、リフレクションや
     デバッグのための多ターン対話に使用する。
     レートリミット時には指数バックオフで自動リトライする。
     META_REASONING_EFFORT でメタLLMの推論量を制御する。
 
     Args:
-        msg_list (list[dict]): メッセージ履歴のリスト（role/contentの辞書）。
+        msg_list (list[dict]): メッセージ履歴のリスト (role/contentの辞書) 。
         model (str): 使用するGPTモデル名。
 
     Returns:
@@ -120,7 +120,7 @@ class LLMAgentBase:
     プロンプトの構築、GPTへの問い合わせ、応答のパースを担当する。
 
     Attributes:
-        output_fields (list): LLMに出力させるフィールド名のリスト（例: ['thinking', 'answer']）。
+        output_fields (list): LLMに出力させるフィールド名のリスト (例: ['thinking', 'answer']) 。
         agent_name (str): エージェントの名前。
         role (str): LLMに与える役割の説明。
         model (str): 使用するGPTモデル名。
@@ -152,7 +152,7 @@ class LLMAgentBase:
     def generate_prompt(self, input_infos, instruction) -> tuple[str, str]:
         """LLMに送るプロンプトを構築する。
 
-        入力情報（Infoオブジェクトのリスト）と指示文から、
+        入力情報 (Infoオブジェクトのリスト) と指示文から、
         システムプロンプトとユーザープロンプトを生成する。
         answerフィールドにはtrue/falseのみを返す旨の指示が付加される。
 
@@ -163,7 +163,7 @@ class LLMAgentBase:
         Returns:
             tuple: (システムプロンプト, ユーザープロンプト)
         """
-        # システムプロンプトの構築（役割 + 出力フォーマット指定）
+        # システムプロンプトの構築 (役割 + 出力フォーマット指定)
         output_fields_and_description = {
             key: (
                 f"Your {key}."
@@ -207,7 +207,7 @@ class LLMAgentBase:
         Args:
             input_infos (list): 入力情報のInfoオブジェクトのリスト。
             instruction (str): タスクの指示文。
-            iteration_idx (int): イテレーション番号（-1は番号なし）。
+            iteration_idx (int): イテレーション番号 (-1は番号なし) 。
 
         Returns:
             list[Info]: 出力情報のInfoオブジェクトのリスト。
@@ -274,17 +274,17 @@ def search(args):
     評価を繰り返し、進化的にアーカイブを拡張していく。
     結果は各世代ごとにJSONファイルに保存される。
 
-    n_generation < max_gen の場合は探索をスキップする（test評価のみが目的のケース）。
+    n_generation < max_gen の場合は探索をスキップする (test評価のみが目的のケース) 。
     fitness が欠けているエントリがある場合はその評価のみを行い、生成は次回実行に委ねる。
 
     Args:
-        args: コマンドライン引数（モデル名、世代数、保存先など）。
+        args: コマンドライン引数 (モデル名、世代数、保存先など) 。
     """
     file_path = os.path.join(args.save_dir, f"{args.expr_name}.json")
     if os.path.exists(file_path):
         with open(file_path, "r") as json_file:
             archive = json.load(json_file)
-        # 評価前保存で中断された未完成エントリ（fitness無し生成エージェント）を再評価して完了させる
+        # 評価前保存で中断された未完成エントリ (fitness無し生成エージェント) を再評価して完了させる
         if (
             archive
             and isinstance(archive[-1].get("generation"), int)
@@ -313,8 +313,30 @@ def search(args):
         else:
             start = 0
     else:
-        archive = get_init_archive()
+        archive = []
         start = 0
+
+    # ターゲット baseline の決定
+    if args.baselines == "all":
+        target_keys = list(BASELINES.keys())
+    else:
+        target_keys = [k.strip() for k in args.baselines.split(",")]
+    target_names = {BASELINES[k]["name"] for k in target_keys if k in BASELINES}
+
+    # 不足している baseline を先頭に挿入 (start 計算後なので生成エージェントの位置に影響しない)
+    existing_names = {e.get("name") for e in archive}
+    missing_baselines = [
+        copy.deepcopy(BASELINES[k])
+        for k in target_keys
+        if k in BASELINES and BASELINES[k]["name"] not in existing_names
+    ]
+    archive = missing_baselines + archive
+
+    # 不足 baseline を追加した場合はファイルに反映する
+    if missing_baselines:
+        os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
+        with open(file_path, "w") as json_file:
+            json.dump(archive, json_file, indent=4)
 
     # 現在の最大世代番号が n_generation を超えていれば探索をスキップ
     gen_nums = [
@@ -324,18 +346,22 @@ def search(args):
     if max_gen > args.n_generation:
         return
 
-    # fitness が欠けているエントリがあれば評価のみ行い、生成は次回実行に委ねる
-    fitness_missing = any("fitness" not in e for e in archive)
+    # ターゲット baseline に fitness が欠けていれば評価のみ行い、生成は次回実行に委ねる
+    fitness_missing = any(
+        "fitness" not in e for e in archive if e.get("name") in target_names
+    )
 
     if fitness_missing:
         for solution in archive:
             if "fitness" in solution:
                 continue
+            if solution.get("name") not in target_names:
+                continue
 
             solution["generation"] = "initial"
             print(f"============Initial Archive: {solution['name']}=================")
 
-            # 評価前にアーカイブを書き出し（クラッシュ時にどのエージェントを評価中か確認可能）
+            # 評価前にアーカイブを書き出し (クラッシュ時にどのエージェントを評価中か確認可能)
             os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
             with open(file_path, "w") as json_file:
                 json.dump(archive, json_file, indent=4)
@@ -384,14 +410,14 @@ def search(args):
             print(e)
             continue
 
-        # 評価前にアーカイブに追加して書き出し（クラッシュ時にどのコードを評価中か確認可能）
+        # 評価前にアーカイブに追加して書き出し (クラッシュ時にどのコードを評価中か確認可能)
         next_solution["generation"] = n + 1
         archive.append(next_solution)
         os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
         with open(file_path, "w") as json_file:
             json.dump(archive, json_file, indent=4)
 
-        # 提案されたエージェントの評価（失敗時はデバッグを試みる）
+        # 提案されたエージェントの評価 (失敗時はデバッグを試みる)
         label_pairs = []
         for _ in range(args.debug_max):
             try:
@@ -446,6 +472,7 @@ def evaluate(args):
     """探索済みアーカイブの全エージェントをテストデータで評価する。
 
     test_fitness が未設定のエントリのみ評価し、結果を同一ファイルに上書き保存する。
+    ターゲット外の baseline エージェントはスキップする。
 
     Args:
         args: コマンドライン引数。
@@ -454,8 +481,23 @@ def evaluate(args):
     with open(file_path, "r") as json_file:
         archive = json.load(json_file)
 
+    all_baseline_names = {v["name"] for v in BASELINES.values()}
+    target_keys = (
+        list(BASELINES.keys())
+        if args.baselines == "all"
+        else [k.strip() for k in args.baselines.split(",")]
+    )
+    target_names = {BASELINES[k]["name"] for k in target_keys if k in BASELINES}
+
     for sol in archive:
         if "test_fitness" in sol:
+            continue
+        if "fitness" not in sol:
+            continue
+        if (
+            sol.get("name") in all_baseline_names
+            and sol.get("name") not in target_names
+        ):
             continue
         print(f"current_gen: {sol['generation']}, name: {sol.get('name', '?')}")
         try:
@@ -477,7 +519,7 @@ def evaluate_forward_fn(args, forward_str, split="val"):
     split="val" では検証データ、split="test" ではテストデータを使用する。
 
     Args:
-        args: コマンドライン引数（データサイズ、ワーカー数など）。
+        args: コマンドライン引数 (データサイズ、ワーカー数など) 。
         forward_str (str): forward()関数のソースコード文字列。
         split (str): 使用するデータ分割 ("val" または "test")。
 
@@ -498,7 +540,7 @@ def evaluate_forward_fn(args, forward_str, split="val"):
         raise AssertionError(f"{func} is not callable")
     setattr(AgentSystem, "forward", func)
 
-    # split に応じてデータを読み込む（前処理済みCSVから）
+    # split に応じてデータを読み込む (前処理済みCSVから)
     examples = get_all_examples(split)
     examples = examples * args.n_repeat
 
@@ -550,25 +592,100 @@ def evaluate_forward_fn(args, forward_str, split="val"):
 if __name__ == "__main__":
     # コマンドライン引数のパース
     parser = argparse.ArgumentParser()
-    parser.add_argument("--n_repeat", type=int, default=1)
-    parser.add_argument("--multiprocessing", action="store_true", default=True)
-    parser.add_argument("--max_workers", type=int, default=48)
-    parser.add_argument("--save_dir", type=str, default="results/")
-    parser.add_argument("--expr_name", type=str, default="em")
-    parser.add_argument("--n_generation", type=int, default=15)
-    parser.add_argument("--debug_max", type=int, default=3)
-    parser.add_argument("--model", type=str, default="gpt-5.4-mini")
-    parser.add_argument("--eval_model", type=str, default="gpt-5-nano")
-    parser.add_argument("--meta_reasoning_effort", type=str, default="none")
-    parser.add_argument("--eval_reasoning_effort", type=str, default="minimal")
-    parser.add_argument("--debug", action="store_true", default=False)
     parser.add_argument(
-        "--no_test_eval", dest="test_eval", action="store_false", default=True
+        "--n_repeat",
+        type=int,
+        default=1,
+        help="各サンプルを何回繰り返し評価するか (デフォルト: 1)",
+    )
+    parser.add_argument(
+        "--multiprocessing",
+        action="store_true",
+        default=True,
+        help="マルチスレッドでの並列評価を有効にする (デフォルト: 有効)",
+    )
+    parser.add_argument(
+        "--max_workers",
+        type=int,
+        default=48,
+        help="並列評価の最大スレッド数 (デフォルト: 48)",
+    )
+    parser.add_argument(
+        "--save_dir",
+        type=str,
+        default="results/",
+        help="結果JSONファイルの保存ディレクトリ (デフォルト: results/)",
+    )
+    parser.add_argument(
+        "--expr_name",
+        type=str,
+        default="em",
+        help="実験名。結果ファイル名は {expr_name}.json になる (デフォルト: em)",
+    )
+    parser.add_argument(
+        "--n_generation",
+        type=int,
+        default=15,
+        help="生成するエージェントの世代数上限。0 を指定するとbaseline評価のみ行う (デフォルト: 15)",
+    )
+    parser.add_argument(
+        "--debug_max",
+        type=int,
+        default=3,
+        help="評価失敗時にメタLLMへデバッグ依頼する最大回数 (デフォルト: 3)",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="gpt-5.4-mini",
+        help="新しいエージェントを生成するメタLLMのモデル名 (デフォルト: gpt-5.4-mini)",
+    )
+    parser.add_argument(
+        "--eval_model",
+        type=str,
+        default="gpt-5-nano",
+        help="エージェントのforward関数内で使用するLLMのモデル名 (デフォルト: gpt-5-nano)",
+    )
+    parser.add_argument(
+        "--meta_reasoning_effort",
+        type=str,
+        default="none",
+        help="メタLLM (エージェント生成) の推論量: none/low/medium/high (デフォルト: none)",
+    )
+    parser.add_argument(
+        "--eval_reasoning_effort",
+        type=str,
+        default="minimal",
+        help="評価LLM (forward関数内) の推論量: minimal/low/medium/high (デフォルト: minimal)",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        default=False,
+        help="LLMの生の入出力をデバッグ表示する (デフォルト: 無効)",
+    )
+    parser.add_argument(
+        "--no_test_eval",
+        dest="test_eval",
+        action="store_false",
+        default=True,
+        help="テストデータでの評価 (test_fitness の算出) を無効にする",
+    )
+    parser.add_argument(
+        "--baselines",
+        type=str,
+        default="all",
+        help=(
+            "使用するbaseline agentをカンマ区切りで指定、または 'all' で全選択 (デフォルト: all)\n"
+            "  キー一覧: cot, sc, reflexion, debate, qd, role\n"
+            "  例1 (モデルベンチマーク) : --baselines cot,sc --n_generation 0 --no_test_eval\n"
+            "  例2 (通常ADAS実行、CoT結果を使い回し) : --baselines all --n_generation 15"
+        ),
     )
 
     args = parser.parse_args()
 
-    # グローバル変数に反映（exec() 経由の生成エージェントコードから args にアクセスできないため）
+    # グローバル変数に反映 (exec() 経由の生成エージェントコードから args にアクセスできないため)
     PRINT_LLM_DEBUG = args.debug
     EVAL_MODEL = args.eval_model
     EVAL_REASONING_EFFORT = args.eval_reasoning_effort

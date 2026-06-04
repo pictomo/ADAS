@@ -492,16 +492,14 @@ Put your new reflection thinking in "reflection". Repeat the previous "thought" 
 """
 
 
-def get_init_archive():
-    """探索の初期アーカイブを返す。
-
-    6つのベースラインエージェント（CoT, CoT-SC, Reflexion, LLM Debate, QD, Role Assignment）を
-    初期集団として返す。これらを出発点として新しいエージェントが進化的に探索される。
-
-    Returns:
-        list[dict]: 初期エージェントアーキテクチャのリスト。
-    """
-    return [COT, COT_SC, Reflexion, LLM_debate, QD, Role_Assignment]
+BASELINES = {
+    "cot":       COT,
+    "sc":        COT_SC,
+    "reflexion": Reflexion,
+    "debate":    LLM_debate,
+    "qd":        QD,
+    "role":      Role_Assignment,
+}
 
 
 def get_prompt(
