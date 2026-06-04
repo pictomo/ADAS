@@ -19,7 +19,7 @@ load_dotenv()
 from em_prompt import BASELINES, get_prompt, get_reflexion_prompt
 
 # OpenAI APIクライアントの初期化
-client = openai.OpenAI()
+client = openai.OpenAI(timeout=60.0)
 
 from utils import (
     get_all_examples,
@@ -51,7 +51,7 @@ EVAL_REASONING_EFFORT = "minimal"
 META_REASONING_EFFORT = "none"
 
 
-@backoff.on_exception(backoff.expo, openai.RateLimitError, max_tries=10)
+@backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APITimeoutError, openai.APIConnectionError, openai.InternalServerError), max_tries=10)
 def get_json_response_from_gpt(msg, model, system_message):
     """GPTモデルからJSON形式のレスポンスを取得する。
 
@@ -84,7 +84,7 @@ def get_json_response_from_gpt(msg, model, system_message):
     return json_dict
 
 
-@backoff.on_exception(backoff.expo, openai.RateLimitError, max_tries=10)
+@backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APITimeoutError, openai.APIConnectionError, openai.InternalServerError), max_tries=10)
 def get_json_response_from_gpt_reflect(msg_list, model):
     """GPTモデルからリフレクション用のJSONレスポンスを取得する。
 
