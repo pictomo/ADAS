@@ -49,6 +49,8 @@ EVAL_MODEL = "gpt-5-nano"
 EVAL_REASONING_EFFORT = "minimal"
 # メタLLM用推論量 (--meta_reasoning_effort から上書きされる)
 META_REASONING_EFFORT = "none"
+# LLM応答の最大トークン数 (評価用・メタ用の両APIコールで共通)
+MAX_COMPLETION_TOKENS = 4096
 
 
 @backoff.on_exception(backoff.expo, (openai.RateLimitError, openai.APITimeoutError, openai.APIConnectionError, openai.InternalServerError), max_tries=10)
@@ -74,7 +76,7 @@ def get_json_response_from_gpt(msg, model, system_message):
             {"role": "user", "content": msg},
         ],
         reasoning_effort=EVAL_REASONING_EFFORT,
-        max_completion_tokens=4096,
+        max_completion_tokens=MAX_COMPLETION_TOKENS,
         response_format={"type": "json_object"},
     )
     content = response.choices[0].message.content
@@ -104,7 +106,7 @@ def get_json_response_from_gpt_reflect(msg_list, model):
         model=model,
         messages=msg_list,
         reasoning_effort=META_REASONING_EFFORT,
-        max_completion_tokens=4096,
+        max_completion_tokens=MAX_COMPLETION_TOKENS,
         response_format={"type": "json_object"},
     )
     content = response.choices[0].message.content
@@ -385,7 +387,7 @@ def search(args):
     for n in range(start, args.n_generation):
         print(f"============Generation {n + 1}=================")
         # メタプロンプトを構築して新しいエージェントを提案させる
-        system_prompt, prompt = get_prompt(archive, EVAL_MODEL, EVAL_REASONING_EFFORT)
+        system_prompt, prompt = get_prompt(archive, EVAL_MODEL, EVAL_REASONING_EFFORT, MAX_COMPLETION_TOKENS)
         msg_list = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},

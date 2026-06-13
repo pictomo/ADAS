@@ -262,7 +262,7 @@ def get_json_response_from_gpt(msg, model, system_message):
             {"role": "user", "content": msg},
         ],
         reasoning_effort=EVAL_REASONING_EFFORT,
-        max_completion_tokens=1024,
+        max_completion_tokens=[MAX_COMPLETION_TOKENS],
         response_format={"type": "json_object"}
     )
     content = response.choices[0].message.content
@@ -369,9 +369,8 @@ class AgentArchitecture:
         pass
 ```
 # Model Constraints
-The LLMAgentBase calls use model `[EVAL_MODEL]` with `reasoning_effort="[EVAL_REASONING_EFFORT]"` and `max_completion_tokens=1024`. Keep these constraints in mind:
-- **Prefer 2–3 output fields per LLMAgentBase call.** More fields risk incomplete JSON responses, causing missing answers.
-- **Avoid long context chains.** The model has limited reasoning capacity; simpler, focused prompts work better than verbose multi-step ones.
+The LLMAgentBase calls use model `[EVAL_MODEL]` with `reasoning_effort="[EVAL_REASONING_EFFORT]"` and `max_completion_tokens=[MAX_COMPLETION_TOKENS]`. Keep these constraints in mind:
+- **Calibrate complexity to `[EVAL_MODEL]` / `[EVAL_REASONING_EFFORT]`.** A small number of focused output fields (2-3) and shorter context chains are safer for weaker models or lower reasoning effort, which risk incomplete JSON responses or shallow reasoning on long, multi-step prompts. A more capable model / higher reasoning effort can handle more output fields and longer chains.
 - **Do not hardcode a model name.** Leave `model=None` to use the default.
 
 # Discovered architecture archive
@@ -493,28 +492,28 @@ Put your new reflection thinking in "reflection". Repeat the previous "thought" 
 
 
 BASELINES = {
-    "cot":       COT,
-    "sc":        COT_SC,
+    "cot": COT,
+    "sc": COT_SC,
     "reflexion": Reflexion,
-    "debate":    LLM_debate,
-    "qd":        QD,
-    "role":      Role_Assignment,
+    "debate": LLM_debate,
+    "qd": QD,
+    "role": Role_Assignment,
 }
 
 
 def get_prompt(
-    current_archive, eval_model: str, eval_reasoning_effort: str, adaptive=False
+    current_archive, eval_model: str, eval_reasoning_effort: str, max_completion_tokens: int
 ):
     """探索用のメタプロンプトを生成する。
 
-    メタプロンプトテンプレート(base)にアーカイブ・出力例・評価モデル名・推論量を埋め込み、
+    メタプロンプトテンプレート(base)にアーカイブ・出力例・評価モデル名・推論量・最大トークン数を埋め込み、
     LLMに新しいエージェントアーキテクチャを提案させるためのプロンプトを構築する。
 
     Args:
         current_archive (list[dict]): これまでに発見されたエージェントのリスト。
         eval_model (str): エージェント評価に使用するモデル名。[EVAL_MODEL] プレースホルダに埋め込む。
         eval_reasoning_effort (str): 評価モデルの推論量。[EVAL_REASONING_EFFORT] プレースホルダに埋め込む。
-        adaptive (bool): 適応モードフラグ（現在未使用）。
+        max_completion_tokens (int): エージェント評価APIコールの max_completion_tokens。[MAX_COMPLETION_TOKENS] プレースホルダに埋め込む。
 
     Returns:
         tuple: (システムプロンプト, ユーザープロンプト)
@@ -525,6 +524,7 @@ def get_prompt(
     prompt = prompt.replace("[EXAMPLE]", json.dumps(EXAMPLE))
     prompt = prompt.replace("[EVAL_MODEL]", eval_model)
     prompt = prompt.replace("[EVAL_REASONING_EFFORT]", eval_reasoning_effort)
+    prompt = prompt.replace("[MAX_COMPLETION_TOKENS]", str(max_completion_tokens))
     return system_prompt, prompt
 
 
